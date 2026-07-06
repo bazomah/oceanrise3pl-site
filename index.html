@@ -1,55 +1,149 @@
 <!DOCTYPE html>
-<html lang="ar" dir="rtl">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Ocean Rise Logistics</title>
+
+<title>Ocean Rise 3PL Logistics</title>
 
 <style>
+
 *{
 margin:0;
 padding:0;
 box-sizing:border-box;
+font-family:Arial,Helvetica,sans-serif;
 }
 
 body{
-background:#0d1117;
-color:white;
-font-family:Arial,sans-serif;
+
+background:#ffffff;
+color:#222;
 display:flex;
 justify-content:center;
 align-items:center;
-height:100vh;
-text-align:center;
+min-height:100vh;
+padding:30px;
+
 }
 
 .container{
-padding:40px;
+
+max-width:900px;
+width:100%;
+text-align:center;
+
 }
 
-img{
-width:230px;
-margin-bottom:30px;
+.logo{
+
+width:380px;
+max-width:90%;
+margin-bottom:35px;
+
 }
 
 h1{
-font-size:55px;
-letter-spacing:3px;
-}
 
-h2{
-font-size:22px;
-font-weight:300;
-color:#bbb;
-margin-top:10px;
-letter-spacing:6px;
+font-size:48px;
+font-weight:700;
+margin-bottom:20px;
+color:#111;
+
 }
 
 p{
-margin-top:25px;
+
 font-size:20px;
-color:#ccc;
+color:#666;
+line-height:1.8;
+margin-bottom:45px;
+
 }
+
+.buttons{
+
+display:flex;
+justify-content:center;
+gap:20px;
+flex-wrap:wrap;
+
+}
+
+.btn{
+
+padding:16px 38px;
+border-radius:10px;
+text-decoration:none;
+font-size:18px;
+font-weight:bold;
+transition:.3s;
+
+}
+
+.primary{
+
+background:#111;
+color:white;
+
+}
+
+.primary:hover{
+
+background:#333;
+
+}
+
+.secondary{
+
+border:2px solid #111;
+color:#111;
+
+}
+
+.secondary:hover{
+
+background:#111;
+color:white;
+
+}
+
+footer{
+
+margin-top:70px;
+font-size:15px;
+color:#999;
+
+}
+
+@media(max-width:768px){
+
+.logo{
+
+width:260px;
+
+}
+
+h1{
+
+font-size:34px;
+
+}
+
+p{
+
+font-size:17px;
+
+}
+
+.btn{
+
+width:100%;
+
+}
+
+}
+
 </style>
 
 </head>
@@ -58,15 +152,40 @@ color:#ccc;
 
 <div class="container">
 
-<img src="logo.png">
+<img src="logo.png" class="logo">
 
-<h1>OCEAN RISE</h1>
+<h1>Welcome to Ocean Rise 3PL</h1>
 
-<h2>LOGISTICS</h2>
+<p>
 
-<p>نرتقي بخدمات لوجستية</p>
+Reliable logistics solutions for businesses across Saudi Arabia.
+Specialized in Last Mile Delivery, Warehousing and Fulfillment.
+
+</p>
+
+<div class="buttons">
+
+<a href="#" class="btn primary">
+Our Services
+</a>
+
+<a href="https://wa.me/9665XXXXXXXX"
+class="btn secondary">
+
+Contact Us
+
+</a>
+
+</div>
+
+<footer>
+
+© 2026 Ocean Rise 3PL Logistics
+
+</footer>
 
 </div>
 
 </body>
+
 </html>
