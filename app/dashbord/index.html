@@ -1138,7 +1138,7 @@ function reqCard(r) {
 }
 A_.reqDetail = d => {
   const r = DB.requests.find(x => x.id === d.id); if (!r) return;
-  const act = canAct(r), canAssign = canApprove('approvals') && r.status === 'pending' && r.type !== 'task';
+  const act = canAct(r), canAssign = r.status === 'pending' && r.type !== 'task' && (canFull('approvals') || (canApprove('approvals') && !!curStep(r) && (STEP_ROLES[curStep(r).role] || []).includes(user().role)));
   const kv = [[t('req.from'), r.from], [t('req.type'), t('rtype.' + r.type)], [t('req.date'), fmtDate(r.date)], [t('req.status'), t('st.' + r.status)]];
   if (r.type === 'leave') kv.push([t('req.leave'), `${t('lk.' + r.leaveKind)} · ${fmtDate(r.fromDate)} → ${fmtDate(r.to)} (${t('req.daysN', { n: r.days })})`]);
   if (r.type === 'balance') kv.push([t('req.days'), `+${t('req.daysN', { n: r.days })}`]);
