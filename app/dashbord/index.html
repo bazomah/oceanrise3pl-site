@@ -2758,7 +2758,7 @@ function showLogin(msg, keepUser) {
         const s = await sb.auth.setSession({ access_token: r.data.access_token, refresh_token: r.data.refresh_token });
         if (s.error) { err(t('auth.offline')); }
         else { try { await enter(); return; } catch (x) { err(t('auth.bad')); } }
-      } else if (r.status === 429) err(t('auth.locked', { s: 60 })); else err(t('auth.bad'));
+      } else if (r.status === 429) err(t('auth.locked', { s: 15 })); else err(t('auth.bad'));
     } catch (x) { err(t('auth.offline')); }
     b.disabled = false;
   };
@@ -3315,7 +3315,7 @@ auth.pass|Password|كلمة السر
 auth.show|Show password|إظهار كلمة السر
 auth.signin|Sign in|دخول
 auth.bad|Wrong employee number or password|الرقم الوظيفي أو كلمة السر غير صحيحة
-auth.locked|Too many attempts. Try again in {s}s.|محاولات كثيرة. حاول بعد {s} ثانية.
+auth.locked|Too many attempts. Try again in {s} minutes.|محاولات كثيرة. حاول بعد {s} دقيقة.
 auth.offline|Cannot reach the server|تعذّر الوصول إلى الخادم
 auth.logout|Sign out|تسجيل الخروج
 auth.changePw|Change password|تغيير كلمة السر
