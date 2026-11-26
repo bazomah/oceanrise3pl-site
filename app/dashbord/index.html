@@ -2725,8 +2725,10 @@ async function bootServer() {
   if (!sbConfig()) return false;
   SRV.on = true; document.body.classList.add('srv');
   try { await loadScript(SB_CDN); } catch (e) { showLogin(t('auth.offline')); return true; }
-  sb = window.supabase.createClient(OR_CONFIG.url, OR_CONFIG.anonKey, { auth: { storage: window.sessionStorage, persistSession: true, autoRefreshToken: true, detectSessionInUrl: false } });
-  sb.auth.onAuthStateChange(ev => { if (ev === 'SIGNED_OUT' && document.body.classList.contains('authed')) { DB = defaults(); showLogin(); } });
+  /* each tab keeps its own session, so it also keeps its own lock: a frozen background tab can no longer block sign-in in the others */
+  const tabLock = (() => { let q = Promise.resolve(); return (name, timeout, run) => { const r = q.then(() => run()); q = r.catch(() => {}); return r; }; })();
+  sb = window.supabase.createClient(OR_CONFIG.url, OR_CONFIG.anonKey, { auth: { storage: window.sessionStorage, persistSession: true, autoRefreshToken: true, detectSessionInUrl: false, lock: tabLock } });
+  sb.auth.onAuthStateChange(ev => { if (ev === 'SIGNED_OUT' && document.body.classList.contains('authed')) { DB = defaults(); showLogin(SRV.leaving ? '' : t('auth.expired')); } SRV.leaving = false; });
   const { data } = await sb.auth.getSession();
   if (data.session) { try { await enter(); return true; } catch (e) {} }
   showLogin(); return true;
@@ -2750,7 +2752,7 @@ function showLogin(msg, keepUser) {
   const f = $('#lform'), err = m => { $('#lerr').textContent = m; f.classList.remove('shake'); void f.offsetWidth; f.classList.add('shake'); };
   f.onsubmit = async e => {
     e.preventDefault();
-    const u = $('#lu').value.trim(), p = $('#lp').value; if (!u || !p) { err(t('auth.bad')); return; }
+    const u = $('#lu').value.replace(/\s+/g, ''), p = $('#lp').value; if (!u || !p) { err(t('auth.bad')); return; }
     const b = $('.lgo', f); b.disabled = true;
     try {
       const r = await fn('login', { username: u, password: p });
@@ -2766,7 +2768,7 @@ function showLogin(msg, keepUser) {
 }
 A_.loginLang = d => { const u = $('#lu')?.value; LANG = d.v; setPref('lang', LANG); applyShell(); showLogin('', u); };
 A_.eye = () => { const i = $('#lp'); i.type = i.type === 'password' ? 'text' : 'password'; $('.pw-eye').innerHTML = ic(i.type === 'password' ? 'eye' : 'eye-off'); i.focus(); };
-A_.logout = async () => { try { await flush(); } catch (e) {} DB = defaults(); UI.page = 'overview'; showLogin(); try { await sb.auth.signOut(); } catch (e) {} };
+A_.logout = async () => { try { await flush(); } catch (e) {} DB = defaults(); UI.page = 'overview'; showLogin(); SRV.leaving = true; try { await sb.auth.signOut(); } catch (e) {} SRV.leaving = false; };
 
 /* ---------- change password ---------- */
 function pwModal(locked) {
@@ -3315,6 +3317,7 @@ auth.pass|Password|كلمة السر
 auth.show|Show password|إظهار كلمة السر
 auth.signin|Sign in|دخول
 auth.bad|Wrong employee number or password|الرقم الوظيفي أو كلمة السر غير صحيحة
+auth.expired|Your session ended. Please sign in again.|انتهت الجلسة، سجّل دخولك مرة أخرى.
 auth.locked|Too many attempts. Try again in {s} minutes.|محاولات كثيرة. حاول بعد {s} دقيقة.
 auth.offline|Cannot reach the server|تعذّر الوصول إلى الخادم
 auth.logout|Sign out|تسجيل الخروج
