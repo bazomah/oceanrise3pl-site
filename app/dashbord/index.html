@@ -733,7 +733,7 @@ function loadDB() {
   return defaults();
 }
 let DB = loadDB();
-const SRV = { on: false, token: '', rev: 0, t: null, inflight: false, dirty: false, me: null };
+const SRV = { on: false, token: '', rev: 0, t: null, inflight: false, dirty: false, me: null, stamp: null };
 function save() { if (SRV.on) { queuePush(); return; } try { localStorage.setItem(DBKEY, JSON.stringify(DB)); } catch (e) { toast(t('toast.storage'), 'bad'); } }
 function nextId(kind, prefix, w = 3) { DB.seq[kind] = (DB.seq[kind] || 0) + 1; return prefix + String(DB.seq[kind]).padStart(w, '0'); }
 
@@ -2703,8 +2703,13 @@ async function pull(force) {
   try {
     const { data } = await sb.auth.getSession(); if (!data.session) { showLogin(); return; }
     if (!force && (SRV.dirty || SRV.inflight)) return;
+    /* one tiny request first: download everything only when something actually changed */
+    const st = await sb.rpc('data_stamp'); const stamp = st.error ? null : st.data;
+    if (!force && stamp !== null && stamp === SRV.stamp) return;
     const db = await fetchAll();
-    if (!force && (SRV.dirty || SRV.inflight || norm(db) === norm(DB))) return;
+    if (!force && (SRV.dirty || SRV.inflight)) return;
+    SRV.stamp = stamp;
+    if (!force && norm(db) === norm(DB)) return;
     adopt(db); render();
   } catch (e) {}
 }
@@ -2715,7 +2720,7 @@ async function enter() {
   const { data } = await sb.auth.getSession(); const uid = data.session.user.id;
   const pr = await sb.from('profiles').select('*').eq('id', uid).single();
   if (pr.error || pr.data.status !== 'active') { await sb.auth.signOut(); throw new Error('profile'); }
-  const me = userObj(pr.data); SRV.me = { userId: uid, must: me.mustChange }; CUR = uid;
+  const me = userObj(pr.data); SRV.me = { userId: uid, must: me.mustChange }; SRV.stamp = null; CUR = uid;
   let db; if (me.mustChange) { db = defaults(); db.users = [me]; } else db = await fetchAll();
   adopt(db); $('#loginRoot').innerHTML = ''; document.body.classList.add('authed');
   UI.page = firstPage(); render(true);
