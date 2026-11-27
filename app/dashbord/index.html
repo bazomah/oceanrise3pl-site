@@ -799,7 +799,7 @@ function stats() {
   const healthy = tracked.filter(d => daysUntil(d) > 30).length;
   const soon = tracked.filter(d => { const n = daysUntil(d); return n >= 0 && n <= 30; }).length;
   const expired = tracked.filter(d => daysUntil(d) < 0).length;
-  const rows = DB.ops?.rows || [];
+  const rows = OPS()?.rows || [];
   const totalOrders = rows.reduce((s, r) => s + r.orders, 0);
   const ach = rows.length && DB.target ? clamp(totalOrders / (DB.target * rows.length), 0, 9.99) : null;
   return {
@@ -1344,7 +1344,7 @@ function pgOverview() {
     <div class="gauges">${ring(s.readyPct, t('g.fleet'), '#2ee6d6')}${ring(s.compPct, t('g.compliance'), '#6aa8ff')}${ring(s.ach === null ? null : Math.min(1, s.ach), t('g.target'), '#c4adff')}</div>
   </section>
   <div class="grid g4 stag">
-    ${[['t-cy', 'users', 'kpi.emps', s.emps, t('kpi.couriers', { n: s.couriers })], ['t-bl', 'truck', 'kpi.fleet', s.ready, t('kpi.ofVeh', { n: s.vehs })], ['t-sa', 'circle-check', 'kpi.pending', s.pending, t('kpi.tasks', { n: s.openTasks })], ['t-vi', 'activity', 'kpi.orders', s.totalOrders, DB.ops ? t('kpi.fromFile', { f: DB.ops.file }) : t('kpi.noReport')]]
+    ${[['t-cy', 'users', 'kpi.emps', s.emps, t('kpi.couriers', { n: s.couriers })], ['t-bl', 'truck', 'kpi.fleet', s.ready, t('kpi.ofVeh', { n: s.vehs })], ['t-sa', 'circle-check', 'kpi.pending', s.pending, t('kpi.tasks', { n: s.openTasks })], ['t-vi', 'activity', 'kpi.orders', s.totalOrders, OPS() ? t('kpi.fromFile', { f: OPS().file }) : t('kpi.noReport')]]
       .map(([tone, i, k, n, foot]) => `<div class="card glass spot kpi ${tone}"><div class="top"><span>${esc(t(k))}</span><span class="orb">${ic(i)}</span></div><div class="num" data-count="${n}">${nf(n)}</div><div class="foot">${esc(foot)}</div></div>`).join('')}
   </div>
   ${(() => {
@@ -1780,7 +1780,7 @@ const EXPORTS = {
 A_.exportCSV = d => { const rows = EXPORTS[d.k](); if (rows.length < 2) { toast(t('rep.nodata'), 'warn'); return; } downloadCSV(`oceanrise-${d.k}-${today()}.csv`, rows); };
 function pgReports() {
   const s = stats();
-  const tiles = [['employees', 'users', 't-cy', DB.employees.length], ['vehicles', 'truck', 't-bl', DB.vehicles.length], ['licenses', 'shield', 't-vi', DB.licenses.length], ['requests', 'circle-check', 't-sa', DB.requests.length], ['ops', 'activity', 't-gr', DB.ops?.rows.length || 0], ['maintenance', 'wrench', 't-co', DB.maint.length], ['custody', 'wallet', 't-sa', DB.requests.filter(r => ['custody', 'custody_maint', 'parts', 'advance'].includes(r.type)).length], ...(canView('finance') ? [['payments', 'wallet', 't-co', finReqs().length], ['vouchers', 'receipt', 't-vi', allVouchers().length]] : []), ...(seesEntitlement() ? [['entitlement', 'target', 't-sa', DB.ops?.rows.length || 0]] : [])];
+  const tiles = [['employees', 'users', 't-cy', DB.employees.length], ['vehicles', 'truck', 't-bl', DB.vehicles.length], ['licenses', 'shield', 't-vi', DB.licenses.length], ['requests', 'circle-check', 't-sa', DB.requests.length], ['ops', 'activity', 't-gr', OPS()?.rows.length || 0], ['maintenance', 'wrench', 't-co', DB.maint.length], ['custody', 'wallet', 't-sa', DB.requests.filter(r => ['custody', 'custody_maint', 'parts', 'advance'].includes(r.type)).length], ...(canView('finance') ? [['payments', 'wallet', 't-co', finReqs().length], ['vouchers', 'receipt', 't-vi', allVouchers().length]] : []), ...(seesEntitlement() ? [['entitlement', 'target', 't-sa', DB.ops?.rows.length || 0]] : [])];
   const tot = s.tracked || 1;
   const rq = k => DB.requests.filter(r => r.status === k).length;
   const rt = DB.requests.length || 1;
@@ -2121,13 +2121,13 @@ function entOf(r) {
   const k = rates(), o = r2((r.orders || 0) * k.order), d = r2((r.km || 0) * k.km), sub = r2(o + d), vat = r2(sub * k.vat / 100);
   return { orders: o, km: d, sub, vat, total: r2(sub + vat) };
 }
-const entTotals = () => (DB.ops?.rows || []).reduce((a, r) => { const e = entOf(r); ['orders', 'km', 'sub', 'vat', 'total'].forEach(k => a[k] = r2(a[k] + e[k])); return a; }, { orders: 0, km: 0, sub: 0, vat: 0, total: 0 });
+const entTotals = () => (OPS()?.rows || []).reduce((a, r) => { const e = entOf(r); ['orders', 'km', 'sub', 'vat', 'total'].forEach(k => a[k] = r2(a[k] + e[k])); return a; }, { orders: 0, km: 0, sub: 0, vat: 0, total: 0 });
 /* the entitlement from HungerStation is for the CEO only */
 const seesEntitlement = () => user().role === 'ceo';
 const money = n => nf(r2(n)).replace(/(\.\d)$/, '$10');
 const fmtRating = v => (v === undefined ? '—' : v > 5 ? `${Math.round(v * 10) / 10}%` : (Math.round(v * 100) / 100).toFixed(2));
 const ratingTone = v => (v === undefined ? 'info' : v > 5 ? (v >= 90 ? 'ok' : v >= 75 ? 'warn' : 'bad') : (v >= 4.5 ? 'ok' : v >= 4 ? 'warn' : 'bad'));
-const hsRowOf = e => e && DB.ops ? DB.ops.rows.find(r => r.empId === e.id || normName(r.name) === normName(e.name)) : null;
+const hsRowOf = e => { const o = OPS(); return e && o ? o.rows.find(r => r.empId === e.id || (!r.rider && normName(r.name) === normName(e.name))) : null; };
 const hsProd = r => (r.prod !== undefined ? r.prod : r.hours ? r.orders / r.hours : r.shifts ? r.orders / r.shifts : undefined);
 const hsProdLabel = r => (r.prod !== undefined || r.hours ? t('hs.perHour') : t('hs.perShift'));
 
@@ -2138,7 +2138,7 @@ A_.editRates = () => openModal({
 });
 
 A_.courierDetail = d => {
-  const r = (DB.ops?.rows || [])[Number(d.i)]; if (!r) return;
+  const r = (OPS()?.rows || [])[Number(d.i)]; if (!r) return;
   const p = hsProd(r), e = entOf(r), kv = [[t('hs.orders'), nf(r.orders)], [t('hs.km'), r.km !== undefined ? nf(r2(r.km)) : '—'], [t('hs.shifts'), r.shifts !== undefined ? nf(r.shifts) : '—'], [t('hs.hours'), r.hours !== undefined ? nf(r2(r.hours)) : '—'], [t('hs.rating'), fmtRating(r.rating)], [t('hs.productivity') + (p !== undefined ? ` (${hsProdLabel(r)})` : ''), p !== undefined ? nf(r2(p)) : '—']];
   ['accept', 'cancel', 'late'].forEach(k => { if (r[k] !== undefined) kv.push([t('hs.' + k), nf(r2(r[k]))]); });
   if (seesEntitlement()) kv.push([t('fin.entOrders'), SAR(money(e.orders))], [t('fin.entKm'), SAR(money(e.km))], [t('fin.entSub'), SAR(money(e.sub))], [t('fin.entTotal'), SAR(money(e.total))]);
@@ -2149,7 +2149,7 @@ function hsKpis(rows, tg) {
   const sum = k => rows.reduce((s, r) => s + (r[k] || 0), 0), has = k => rows.some(r => r[k] !== undefined);
   const rr = rows.filter(r => r.rating !== undefined), avgRating = rr.length ? rr.reduce((s, r) => s + r.rating, 0) / rr.length : undefined;
   const total = sum('orders'), ach = Math.round(total / (tg * rows.length) * 100);
-  const list = [['t-cy', 'users', t('ops.couriers'), nf(rows.length), DB.ops.file], ['t-bl', 'package', t('ops.total'), nf(total), fmtDate(DB.ops.at)]];
+  const list = [['t-cy', 'users', t('ops.couriers'), nf(rows.length), OPS().file], ['t-bl', 'package', t('ops.total'), nf(total), fmtDate(OPS().at)]];
   if (has('km')) list.push(['t-vi', 'map-pin', t('hs.km'), nf(r2(sum('km'))), t('hs.kmFoot')]);
   if (has('shifts')) list.push(['t-co', 'clock', t('hs.shifts'), nf(sum('shifts')), t('hs.shiftsFoot', { n: r2(total / (sum('shifts') || 1)) })]);
   if (avgRating !== undefined) list.push(['t-sa', 'star', t('hs.avgRating'), fmtRating(avgRating), t('hs.ratedN', { n: rr.length })]);
@@ -2159,8 +2159,9 @@ function hsKpis(rows, tg) {
 }
 
 function pgOps() {
-  const ed = canEdit('ops'); const o = DB.ops; const tg = DB.target;
-  const hidden = `<input type="file" id="opsfile" hidden accept=".csv,.txt,.xlsx,.xls">`;
+  const ed = canEdit('ops'); const o = OPS(); const tg = DB.target;
+  if ((o && o.hs) || hsHas() || (SRV.on && HS.busy && !HS.data)) return pgOpsHS();
+  const hidden = `<input type="file" id="opsfile" hidden multiple accept=".csv,.txt,.xlsx,.xls">`;
   const act = (ed ? btn('pickOps', o ? t('ops.replace') : t('ops.upload'), { cls: 'pri', icon: 'upload' }) : '') + btn('editTarget', `${t('ops.target')}: ${nf(tg)}`, { icon: 'target' }) + (seesEntitlement() ? btn('editRates', t('fin.rates'), { icon: 'receipt' }) : '') + hidden;
   if (!o) return `<div class="pg">${phead(t('page.ops'), t('ops.desc'), act)}<div class="drop" id="dropzone"><span class="orb t-gr">${ic('upload')}</span><h3>${esc(t('ops.dropT'))}</h3><p>${esc(t('ops.dropD'))}</p><div class="acts" style="justify-content:center">${ed ? btn('pickOps', t('ops.choose'), { cls: 'pri', icon: 'upload' }) : ''}${btn('opsTemplate', t('ops.template'), { icon: 'download' })}</div></div></div>`;
   const rows = o.rows; const top3 = rows.slice(0, 3);
@@ -2180,23 +2181,283 @@ function pgOps() {
 /* courier performance on the employee profile and in the portal */
 function hsCard(e) {
   const r = hsRowOf(e); if (!r) return '';
+  if (r.rider) {
+    const kv = [[t('hsr.completed'), n2(r.completed)], [t('hsr.notified'), n2(r.notified)], [t('hsr.declined'), n2(r.declined)], [t('hs.accept'), r.accept !== undefined ? r.accept + '%' : '—'], [t('hsr.workH'), n2(r.actual_h)], [t('hsr.lostH'), n2(r.lost_h)], [t('hsr.breakH'), n2(r.break_h)], [t('hsr.kmPay'), n2(r.km_pay)], [t('hsr.wallet'), r.wallet !== undefined ? money(r.wallet) : '—'], [t('hsr.seg'), r.segment || '—'], [t('ops.achieve'), Math.round(r.orders / DB.target * 100) + '%']];
+    return card(chead(t('hs.mine'), `${t('hs.brand')} · ${OPS().file}`, btn('hsRider', t('hsr.dailyBtn'), { cls: 'sm', icon: 'calendar', data: { r: r.rider } })) + `<div class="list">${kv.map(([k, v]) => `<div class="kv"><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join('')}${r.notes ? `<div class="kv"><span>${esc(t('hs.notes'))}</span><b style="white-space:pre-line">${esc(r.notes)}</b></div>` : ''}</div>`);
+  }
   const p = hsProd(r), kv = [[t('hs.orders'), nf(r.orders)]];
   if (r.km !== undefined) kv.push([t('hs.km'), nf(r2(r.km))]);
   if (r.shifts !== undefined) kv.push([t('hs.shifts'), nf(r.shifts)]);
   if (r.rating !== undefined) kv.push([t('hs.rating'), fmtRating(r.rating)]);
   if (p !== undefined) kv.push([t('hs.productivity'), nf(r2(p))]);
-  return card(chead(t('hs.mine'), `${t('hs.mineSub')} · ${fmtDate(DB.ops.at)}`) + `<div class="list">${kv.map(([k, v]) => `<div class="kv"><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join('')}${r.notes ? `<div class="kv"><span>${esc(t('hs.notes'))}</span><b style="white-space:pre-line">${esc(r.notes)}</b></div>` : ''}</div>`);
+  return card(chead(t('hs.mine'), `${t('hs.mineSub')} · ${fmtDate(OPS().at)}`) + `<div class="list">${kv.map(([k, v]) => `<div class="kv"><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join('')}${r.notes ? `<div class="kv"><span>${esc(t('hs.notes'))}</span><b style="white-space:pre-line">${esc(r.notes)}</b></div>` : ''}</div>`);
 }
 
 /* exports */
-EXPORTS.ops = () => [[t('ops.courier'), t('hs.empNo'), t('ops.orders'), t('hs.km'), t('hs.shifts'), t('hs.hours'), t('hs.rating'), t('ops.achieve'), t('hs.notes'), ...(seesEntitlement() ? [t('fin.entOrders'), t('fin.entKm'), t('fin.entSub')] : [])], ...(DB.ops?.rows || []).map(r => { const e = entOf(r); return [r.name, r.empNo, r.orders, r.km, r.shifts, r.hours, r.rating, Math.round(r.orders / DB.target * 100) + '%', r.notes, ...(seesEntitlement() ? [e.orders, e.km, e.sub] : [])]; })];
-EXPORTS.entitlement = () => seesEntitlement() ? [[t('ops.courier'), t('ops.orders'), t('hs.km'), t('fin.entOrders'), t('fin.entKm'), t('fin.entSub'), t('fin.vat'), t('fin.entTotal')], ...(DB.ops?.rows || []).map(r => { const e = entOf(r); return [r.name, r.orders, r2(r.km || 0), e.orders, e.km, e.sub, e.vat, e.total]; })] : [[]];
+EXPORTS.ops = () => OPS()?.hs ? [[t('ops.courier'), t('hsr.riderNo'), t('hs.empNo'), t('hsr.notified'), t('hsr.completed'), t('hsr.declined'), t('hs.accept'), t('hsr.plannedH'), t('hsr.workH'), t('hsr.lostH'), t('hsr.breakH'), t('hsr.kmTotal'), t('hsr.kmPay'), t('hsr.wallet'), t('hsr.seg'), t('ops.achieve'), t('hs.notes'), ...(seesEntitlement() ? [t('fin.entOrders'), t('fin.entKm'), t('fin.entSub')] : [])], ...OPS().rows.map(r => { const e = entOf(r); return [r.name, r.rider, r.empNo, r.notified, r.completed, r.declined, r.accept, r2(r.planned_h || 0), r2(r.actual_h || 0), r2(r.lost_h || 0), r2(r.break_h || 0), r2(r.km_total || 0), r2(r.km_pay || 0), r.wallet, r.segment, Math.round(r.orders / DB.target * 100) + '%', r.notes, ...(seesEntitlement() ? [e.orders, e.km, e.sub] : [])]; })] : [[t('ops.courier'), t('hs.empNo'), t('ops.orders'), t('hs.km'), t('hs.shifts'), t('hs.hours'), t('hs.rating'), t('ops.achieve'), t('hs.notes'), ...(seesEntitlement() ? [t('fin.entOrders'), t('fin.entKm'), t('fin.entSub')] : [])], ...(OPS()?.rows || []).map(r => { const e = entOf(r); return [r.name, r.empNo, r.orders, r.km, r.shifts, r.hours, r.rating, Math.round(r.orders / DB.target * 100) + '%', r.notes, ...(seesEntitlement() ? [e.orders, e.km, e.sub] : [])]; })];
+EXPORTS.entitlement = () => seesEntitlement() ? [[t('ops.courier'), t('ops.orders'), t('hs.km'), t('fin.entOrders'), t('fin.entKm'), t('fin.entSub'), t('fin.vat'), t('fin.entTotal')], ...(OPS()?.rows || []).map(r => { const e = entOf(r); return [r.name, r.orders, r2(r.km || 0), e.orders, e.km, e.sub, e.vat, e.total]; })] : [[]];
 
 function hsKV(e) {
   const r = hsRowOf(e); if (!r) return '';
   const kv = [[t('hs.orders'), nf(r.orders)]]; if (r.rating !== undefined) kv.push([t('hs.rating'), fmtRating(r.rating)]); if (r.km !== undefined) kv.push([t('hs.km'), nf(r2(r.km))]); if (r.shifts !== undefined) kv.push([t('hs.shifts'), nf(r.shifts)]);
   return kv.map(([k, v]) => `<div class="kv"><span>${esc(t('hs.brand') + ' · ' + k)}</span><b>${esc(v)}</b></div>`).join('');
 }
+
+/* ================= HungerStation daily reports, kept as history =================
+   Each upload adds its days to the record; uploading a day again replaces only that day.
+   The operations page adds everything up over the chosen date range. */
+const HS = { key: '', data: null, busy: false, rev: 0, view: null, vkey: '' };
+const HS_LOCAL = 'oceanrise.hs';
+const hsLocal = () => { try { return JSON.parse(localStorage.getItem(HS_LOCAL) || '[]'); } catch (e) { return []; } };
+const hsKeyOf = h => String(h ?? '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+const HS_MON = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
+const yday = () => iso(new Date(Date.now() - 864e5));
+function hsDate(v) {
+  const mk = (y, mo, d) => (y > 2000 && mo >= 1 && mo <= 12 && d >= 1 && d <= 31 ? `${y}-${pad(mo)}-${pad(d)}` : null);
+  if (typeof v === 'number' && v > 40000 && v < 80000) { const d = new Date(Date.UTC(1899, 11, 30) + Math.floor(v) * 864e5); return mk(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate()); }
+  const s = String(v ?? '').trim(); let m;
+  if ((m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/))) return mk(+m[1], +m[2], +m[3]);
+  if ((m = s.match(/^([A-Za-z]{3})[A-Za-z]*\.?\s+(\d{1,2}),?\s+(\d{4})$/))) return mk(+m[3], HS_MON[m[1].toLowerCase()], +m[2]);
+  if ((m = s.match(/^(\d{1,2})\s+([A-Za-z]{3})[A-Za-z]*\.?,?\s+(\d{4})$/))) return mk(+m[3], HS_MON[m[2].toLowerCase()], +m[1]);
+  if ((m = s.match(/^(\d{1,2})[/.](\d{1,2})[/.](\d{4})$/))) return mk(+m[3], +m[2], +m[1]);
+  return null;
+}
+/* which of the five portal reports a file is, from its column names */
+const hsKindOf = keys => (keys.includes('current_wallet') ? 'wallet' : keys.includes('payable_km') ? 'distance'
+  : keys.includes('required_action') || keys.includes('required_action_ar') ? 'actions'
+  : keys.includes('final_delivery_quality_score') || keys.includes('segment') ? 'quality'
+  : keys.includes('notified_deliveries') || keys.includes('lost_hours') ? 'perf' : null);
+function hsParse(m) {
+  const hi = m.findIndex(r => (r || []).some(c => hsKeyOf(c) === 'rider_id')); if (hi < 0) return null;
+  const keys = m[hi].map(hsKeyOf), kind = hsKindOf(keys); if (!kind) return null;
+  const ri = keys.indexOf('rider_id'), di = keys.findIndex(k => ['created_date', 'activity_date', 'date', 'report_date'].includes(k));
+  const rows = [];
+  m.slice(hi + 1).forEach(r => {
+    if (!r) return;
+    const rid = String(r[ri] ?? '').trim().replace(/\.0+$/, ''); if (!/^\d{1,15}$/.test(rid)) return;
+    const data = {};
+    keys.forEach((k, j) => {
+      if (!k || j === ri || j === di) return; let v = r[j]; if (v === '' || v == null) return;
+      if (typeof v === 'string') { v = v.trim(); if (!v) return; if (/^-?\d+(\.\d+)?(e-?\d+)?$/i.test(v)) v = Number(v); }
+      if (typeof v === 'number') { if (!isFinite(v)) return; v = Math.round(v * 1e4) / 1e4; } else v = String(v).slice(0, 300);
+      data[k] = v;
+    });
+    const k = kind === 'actions' ? String(data.issue || data.issue_ar || '').slice(0, 200) : kind === 'wallet' ? '' : String(data.contract_name || '').slice(0, 200);
+    rows.push({ d: di >= 0 ? hsDate(r[di]) : null, r: rid, k, data });
+  });
+  return rows.length ? { kind, rows } : null;
+}
+async function readMatrix(file) {
+  if (/\.(xlsx|xls)$/i.test(file.name)) { const X = await loadXLSX(); const wb = X.read(await file.arrayBuffer()); return X.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' }); }
+  return parseCSV(await file.text());
+}
+async function handleOpsFiles(picked) {
+  const files = [...(picked || [])]; if (!files.length) return;
+  const got = [], other = [];
+  for (const f of files) { try { const p = hsParse(await readMatrix(f)); if (p) got.push({ name: f.name, ...p }); else other.push(f); } catch (e) { other.push(f); } }
+  if (!got.length) { if (files.length === 1) return handleOpsFile(files[0]); toast(t('hsr.none'), 'warn'); return; }
+  const dated = got.flatMap(g => g.rows.map(r => r.d).filter(Boolean)).sort();
+  const def = dated.length ? dated[dated.length - 1] : yday();
+  const needsDate = got.some(g => g.rows.some(r => !r.d));
+  const info = got.map(g => {
+    const ds = [...new Set(g.rows.map(r => r.d).filter(Boolean))].sort();
+    const when = ds.length ? ' · ' + (ds.length > 1 ? `${fmtDate(ds[0])} – ${fmtDate(ds[ds.length - 1])}` : fmtDate(ds[0])) : '';
+    return `<div class="kv"><span>${chip(t('hsr.k.' + g.kind), 'info')} <small class="mut">${esc(g.name)}</small></span><b>${esc(t('hsr.rowsN', { n: nf(g.rows.length) }) + when)}</b></div>`;
+  }).join('') + (other.length ? `<div class="mut sm" style="margin-top:8px">${esc(t('hsr.skipped', { f: other.map(f => f.name).join(' · ') }))}</div>` : '');
+  openModal({
+    title: t('hsr.importT'), desc: t('hsr.importD'), size: 'md', submit: t('hsr.importGo'),
+    pre: `<div class="list" style="margin-bottom:14px">${info}</div>`,
+    fields: needsDate ? [{ id: 'date', label: t('hsr.repDate'), type: 'date', req: true, value: def, wide: true, hint: t('hsr.repDateHint') }] : [],
+    onSubmit: v => { const d = v.date || def; if (d > today()) return t('hsr.future'); hsImport(got, d); return true; }
+  });
+}
+async function hsImport(got, date) {
+  const by = {};
+  got.forEach(g => g.rows.forEach(r => (by[g.kind] = by[g.kind] || []).push({ d: r.d || date, r: r.r, k: r.k, data: r.data })));
+  let n = 0, bad = 0;
+  for (const [kind, rows] of Object.entries(by)) {
+    if (SRV.on) {
+      const x = await sb.rpc('hs_import', { p_kind: kind, p_rows: rows });
+      if (x.error) { bad++; console.warn('hs_import', x.error); } else n += x.data || 0;
+    } else {
+      const ds = new Set(rows.map(r => r.d)), keep = hsLocal().filter(x => !(x.kind === kind && ds.has(x.d))), seen = new Map();
+      rows.forEach(r => seen.set([r.d, r.r, r.k].join('|'), { kind, ...r }));
+      try { localStorage.setItem(HS_LOCAL, JSON.stringify(keep.concat([...seen.values()]))); n += seen.size; } catch (e) { bad++; }
+    }
+  }
+  if (bad) toast(t('hsr.fail'), 'bad');
+  if (n) toast(t('hsr.done', { n: nf(n) }));
+  const ds = Object.values(by).flat().map(r => r.d).sort(), last = ds[ds.length - 1], r = hsRange();
+  if (last && (last < r.from || last > r.to)) UI.dr.ops = { from: last.slice(0, 8) + '01', to: last };
+  HS.rev++; HS.key = ''; render();
+}
+
+/* ---------- date range ---------- */
+function hsPresetRange(p) {
+  const y = yday(), d = pdate(y);
+  if (p === 'yday') return { from: y, to: y };
+  if (p === '7') return { from: iso(new Date(d.getTime() - 6 * 864e5)), to: y };
+  if (p === 'prev') { const a = new Date(d.getFullYear(), d.getMonth() - 1, 1), b = new Date(d.getFullYear(), d.getMonth(), 0); return { from: iso(a), to: iso(b) }; }
+  return { from: y.slice(0, 8) + '01', to: today() };
+}
+function hsRange() { const d = UI.dr.ops || {}, m = hsPresetRange('month'); const from = d.from || m.from, to = d.to || m.to; return from <= to ? { from, to } : { from: to, to: from }; }
+const hsPreset = () => { const r = hsRange(); return ['yday', '7', 'month', 'prev'].find(p => { const x = hsPresetRange(p); return x.from === r.from && x.to === r.to; }) || ''; };
+A_.hsRange = d => { UI.dr.ops = hsPresetRange(d.p); render(); };
+
+/* ---------- loading the totals ---------- */
+function hsEnsure() {
+  const r = hsRange(), key = [r.from, r.to, SRV.on ? SRV.stamp : HS.rev, CUR].join('|');
+  if (key === HS.key || HS.busy) return;
+  HS.key = key;
+  if (!SRV.on) { HS.data = hsSummaryLocal(hsLocal(), r.from, r.to); return; }
+  if (!sb) return;
+  HS.busy = true;
+  const done = data => { HS.busy = false; HS.data = data; setTimeout(render, 0); };
+  sb.rpc('hs_summary', { d1: r.from, d2: r.to }).then(x => done(x.error ? null : x.data), () => done(null));
+}
+/* the same totals as the server's hs_summary, for the offline copy */
+function hsSummaryLocal(all, d1, d2) {
+  const R = new Map(), D = new Map(), last = {};
+  all.forEach(x => { if (!last[x.kind] || x.d > last[x.kind]) last[x.kind] = x.d; });
+  const num = (o, k) => (typeof o[k] === 'number' ? o[k] : undefined);
+  const add = (o, k, v) => { if (v !== undefined) o[k] = (o[k] || 0) + v; };
+  const P = { shifts: 'shifts', notified: 'notified_deliveries', completed: 'completed_deliveries', accepted: 'accepted_deliveries', declined: 'declined_deliveries', cancelled: 'cancelled_deliveries', not_accepted: 'not_accepted_deliveries', stacked: 'stacked_deliveries', deduction: 'deduction_deliveries', no_shows: 'no_shows', planned_h: 'planned_working_hours', actual_h: 'actual_working_hours', break_h: 'break_hours', lost_h: 'lost_hours' };
+  all.filter(x => x.d >= d1 && x.d <= d2).sort((a, c) => (a.d < c.d ? -1 : a.d > c.d ? 1 : 0)).forEach(x => {
+    const r = R.get(x.r) || { rider: x.r, _days: new Set() }; R.set(x.r, r); const g = x.data || {};
+    const day = D.get(x.d) || { d: x.d, _r: new Set(), n_actions: 0 }; D.set(x.d, day);
+    if (x.kind === 'perf') {
+      r._days.add(x.d); day._r.add(x.r);
+      for (const [k, src] of Object.entries(P)) add(r, k, num(g, src));
+      [['contract_name', 'contract'], ['vehicle_name', 'vehicle'], ['city_name', 'city'], ['tga_status', 'tga']].forEach(([s, k]) => { if (g[s] !== undefined) r[k] = String(g[s]); });
+      ['notified', 'completed', 'declined', 'actual_h', 'lost_h', 'break_h'].forEach(k => add(day, k, num(g, P[k])));
+    } else if (x.kind === 'distance') { add(r, 'km_total', num(g, 'total_km')); add(r, 'km_pay', num(g, 'payable_km')); add(r, 'km_orders', num(g, 'completed_deliveries')); add(day, 'km_pay', num(g, 'payable_km')); }
+    else if (x.kind === 'wallet') { r.wallet = num(g, 'current_wallet'); r.wallet_at = x.d; }
+    else if (x.kind === 'quality') Object.assign(r, { segment: g.segment, dq: num(g, 'final_delivery_quality_score'), dq_ontime: num(g, 'on_time_delivery_score'), q_gross: num(g, 'gross_orders'), q_completed: num(g, 'completed_orders'), q_failed: num(g, 'failed_orders_by_rider'), q_month: g.month, q_at: x.d });
+    else if (x.kind === 'actions') { r.n_actions = (r.n_actions || 0) + 1; (r.actions = r.actions || []).unshift({ d: x.d, i: g.issue_ar || g.issue, ie: g.issue, a: g.required_action_ar || g.required_action }); day.n_actions++; }
+  });
+  const strip = o => Object.fromEntries(Object.entries(o).filter(([k, v]) => v !== undefined && v !== null && k[0] !== '_'));
+  const riders = [...R.values()].map(r => { if (r._days.size) r.days = r._days.size; return strip(r); })
+    .sort((a, c) => (c.completed ?? c.km_orders ?? 0) - (a.completed ?? a.km_orders ?? 0) || (a.rider < c.rider ? -1 : 1));
+  const days = [...D.values()].map(d => { d.riders = d._r.size; return strip(d); }).sort((a, c) => (a.d < c.d ? 1 : -1));
+  return { riders, days, last };
+}
+/* the operations view: the HungerStation history for the chosen range when there is one, otherwise the old single upload */
+function OPS() {
+  hsEnsure();
+  const h = HS.data; if (!h || !h.riders || !h.riders.length) return DB.ops;
+  const vk = DB.employees.map(e => `${e.id}:${e.rider || ''}:${e.name}`).join('|');
+  if (HS.view && HS.view.src === h && HS.vkey === vk) return HS.view;
+  const byRider = new Map(DB.employees.filter(e => String(e.rider || '').trim()).map(e => [String(e.rider).trim(), e]));
+  const rows = h.riders.map(x => {
+    const e = byRider.get(x.rider);
+    return { ...x, name: e ? e.name : '#' + x.rider, empId: e ? e.id : undefined, empNo: e ? e.id : '', orders: x.completed ?? x.km_orders ?? 0, km: x.km_pay, shifts: x.shifts, hours: x.actual_h,
+      accept: x.notified ? r2(x.accepted / x.notified * 100) : undefined, rating: x.dq !== undefined ? r2(x.dq * 100) : undefined,
+      notes: x.actions ? [...new Set(x.actions.map(a => a.i))].join(' · ') : undefined };
+  }).sort((a, b) => b.orders - a.orders);
+  const r = hsRange();
+  HS.view = { src: h, hs: true, file: `${fmtDate(r.from)} – ${fmtDate(r.to)}`, at: r.to, from: r.from, to: r.to, rows, cols: [] }; HS.vkey = vk;
+  return HS.view;
+}
+const hsHas = () => !!(HS.data && HS.data.last && Object.keys(HS.data.last).length);
+const n2 = v => (v === undefined || v === null ? '—' : nf(r2(v)));
+const segTone = s => ({ A: 'ok', B: 'ok', C: 'warn', D: 'bad', F: 'bad' }[s] || 'info');
+
+/* ---------- the operations page ---------- */
+function pgOpsHS() {
+  const ed = canEdit('ops'), tg = DB.target, o = OPS(), h = HS.data || { riders: [], days: [], last: {} }, r = hsRange(), ent = seesEntitlement();
+  const rows = o && o.hs ? o.rows : [];
+  const hidden = `<input type="file" id="opsfile" hidden multiple accept=".csv,.txt,.xlsx,.xls">`;
+  const act = (ed ? btn('pickOps', t('hsr.upload'), { cls: 'pri', icon: 'upload' }) : '') + btn('editTarget', `${t('ops.target')}: ${nf(tg)}`, { icon: 'target' })
+    + (ent ? btn('editRates', t('fin.rates'), { icon: 'receipt' }) : '') + btn('hsClearDay', t('hsr.clearDay'), { icon: 'trash' }) + hidden;
+  const fresh = iso(new Date(Date.now() - 2 * 864e5));
+  const last = ['perf', 'distance', 'quality', 'wallet', 'actions'].filter(k => h.last && h.last[k]).map(k => chip(`${t('hsr.k.' + k)}: ${fmtDate(h.last[k])}`, h.last[k] >= fresh ? 'ok' : 'warn')).join(' ');
+  const pre = [['yday', t('hsr.pYday')], ['7', t('hsr.p7')], ['month', t('hsr.pMonth')], ['prev', t('hsr.pPrev')]], cur = hsPreset();
+  const period = card(chead(t('hsr.period'), `${fmtDate(r.from)} – ${fmtDate(r.to)}`) + `<div class="toolbar" style="margin:0;flex-wrap:wrap;gap:10px"><div class="acts" style="flex-wrap:wrap">${pre.map(([k, l]) => btn('hsRange', l, { cls: 'sm' + (cur === k ? ' pri' : ''), data: { p: k } })).join('')}</div>${dateRange('ops')}</div>${last ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:12px"><span class="mut sm" style="align-self:center">${esc(t('hsr.lastUp'))}</span>${last}</div>` : ''}`);
+  const head = `<div class="pg">${phead(t('page.ops'), t('hsr.desc'), act)}${period}`;
+  if (!rows.length) return `${head}<div class="mt">${card(emptyState(t('hsr.emptyT'), t(HS.busy ? 'hsr.loading' : 'hsr.emptyD')))}</div></div>`;
+  const S = k => rows.reduce((s, x) => s + (x[k] || 0), 0);
+  const notified = S('notified'), accepted = S('accepted'), ach = Math.round(S('orders') / (tg * rows.length) * 100);
+  const tiles = [
+    ['t-cy', 'users', t('hsr.active'), nf(rows.filter(x => x.days).length), t('hsr.ofRiders', { n: nf(rows.length) })],
+    ['t-bl', 'package', t('hsr.completed'), nf(S('completed')), t('hsr.ofNotified', { n: nf(notified) })],
+    ['t-co', 'x', t('hsr.declined'), nf(S('declined')), t('hsr.acceptRate', { n: notified ? Math.round(accepted / notified * 100) : 0 })],
+    ['t-gr', 'clock', t('hsr.workH'), n2(S('actual_h')), t('hsr.ofPlanned', { n: n2(S('planned_h')) })],
+    ['t-sa', 'alert', t('hsr.lostH'), n2(S('lost_h')), t('hsr.breakFoot', { n: n2(S('break_h')) })],
+    ['t-vi', 'map-pin', t('hsr.kmPay'), n2(S('km_pay')), t('hsr.ofKm', { n: n2(S('km_total')) })],
+    ['t-bl', 'wallet', t('hsr.wallet'), money(S('wallet')), t('hsr.walletFoot')],
+    ['t-gr', 'target', t('ops.avg'), ach + '%', t('ops.vsTarget', { n: nf(tg) })]
+  ];
+  if (ent) { const x = entTotals(); tiles.push(['t-sa', 'receipt', t('fin.entTitle'), money(x.sub), `${t('fin.inclVat')}: ${money(x.total)}`]); }
+  const kpis = `<div class="grid g4 stag mt">${tiles.map(([tone, i, k, v, foot]) => `<div class="card glass spot kpi ${tone}"><div class="top"><span>${esc(k)}</span><span class="orb">${ic(i)}</span></div><div class="num">${esc(v)}</div><div class="foot">${esc(foot)}</div></div>`).join('')}</div>`;
+  const segs = ['A', 'B', 'C', 'D', 'F'].map(s => [s, rows.filter(x => x.segment === s).length]);
+  const segHTML = segs.some(s => s[1]) ? `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">${segs.map(([s, n]) => chip(`${t('hsr.seg')} ${s}: ${n}`, segTone(s))).join('')}</div>` : '';
+  const th = k => `<th>${esc(k)}</th>`;
+  const dayRows = (h.days || []).map(d => `<tr><td><b>${esc(fmtDate(d.d))}</b></td><td>${nf(d.riders || 0)}</td><td>${n2(d.notified)}</td><td><b>${n2(d.completed)}</b></td><td>${n2(d.declined)}</td><td>${n2(d.actual_h)}</td><td>${n2(d.lost_h)}</td><td>${n2(d.break_h)}</td><td>${n2(d.km_pay)}</td><td>${d.n_actions ? chip(nf(d.n_actions), 'warn') : '—'}</td></tr>`).join('');
+  const daily = card(chead(t('hsr.daily'), t('hsr.dailySub')) + segHTML + `<div class="tw"><table><thead><tr>${[t('req.date'), t('ops.couriers'), t('hsr.notified'), t('hsr.completed'), t('hsr.declined'), t('hsr.workH'), t('hsr.lostH'), t('hsr.breakH'), t('hsr.kmPay'), t('hs.notes')].map(th).join('')}</tr></thead><tbody>${dayRows}</tbody></table></div>`);
+  const top3 = rows.slice(0, 3), order = [top3[1], top3[0], top3[2]].filter(Boolean), pods = { 0: ['t-sa', 190, 1], 1: ['t-cy', 150, 2], 2: ['t-vi', 120, 3] };
+  const podium = `<div class="podium">${order.map(x => { const [tone, ht, n] = pods[rows.indexOf(x)]; return `<div class="pod">${avatar(x.name)}<b title="${esc(x.name)}">${esc(x.name)}</b><small>${nf(x.orders)}</small><div class="col ${tone}" style="--h:${ht}px">${n}</div></div>`; }).join('')}</div>`;
+  const list = rows.map((x, i) => [x, i]).filter(([x]) => matchQ('ops', x.name, x.rider, x.empNo, x.notes, x.segment));
+  const cols = [t('ops.courier'), t('hsr.notified'), t('hsr.completed'), t('hsr.declined'), t('hsr.workH'), t('hsr.lostH'), t('hsr.breakH'), t('hsr.kmPay'), t('hsr.wallet'), t('hsr.seg'), t('hs.notes'), ...(ent ? [t('fin.entSub')] : [])];
+  const body = list.map(([x, i]) => { const p = x.orders / tg; return `<tr class="clk" data-act="hsRider" data-r="${esc(x.rider)}" style="cursor:pointer"><td class="mut">${i + 1}</td><td><div class="person">${avatar(x.name)}<div><b>${esc(x.name)}</b><small class="mut" style="display:block">#${esc(x.rider)}${x.empId ? '' : ' · ' + esc(t('hsr.unlinked'))}</small></div></div></td><td>${n2(x.notified)}</td><td><b>${n2(x.completed)}</b></td><td>${n2(x.declined)}</td><td>${n2(x.actual_h)}</td><td>${n2(x.lost_h)}</td><td>${n2(x.break_h)}</td><td>${n2(x.km_pay)}</td><td>${x.wallet !== undefined ? esc(money(x.wallet)) : '—'}</td><td>${x.segment ? chip(x.segment, segTone(x.segment)) : '—'}</td><td>${x.n_actions ? chip(nf(x.n_actions), 'warn') : '—'}</td>${ent ? `<td>${esc(money(entOf(x).sub))}</td>` : ''}<td><div class="dbar" style="grid-template-columns:1fr 52px"><div class="bar"><i style="--w:${clamp(p * 100, 3, 100)};--bc:${p >= 1 ? 'var(--ok)' : p >= .7 ? 'var(--warn)' : 'var(--bad)'}"></i></div><b style="color:var(--ink)">${Math.round(p * 100)}%</b></div></td></tr>`; }).join('');
+  return `${head}${kpis}
+    <div class="mt">${daily}</div>
+    <div class="mt">${card(chead(t('ops.podium'), t('ops.podiumSub')) + podium)}</div>
+    <div class="mt">${card(chead(t('ops.rank'), t('hsr.rankSub')) + `<div class="toolbar" style="margin:0 0 12px">${searchBox('ops', t('ops.search'))}</div><div class="tw"><table><thead><tr><th>#</th>${cols.map(th).join('')}<th style="min-width:150px">${esc(t('ops.achieve'))}</th></tr></thead><tbody>${body}</tbody></table></div>`)}</div></div>`;
+}
+
+/* one courier: totals for the range and every day */
+A_.hsRider = async d => {
+  const rid = String(d.r || ''), o = OPS(), x = (o && o.hs ? o.rows : []).find(z => z.rider === rid); if (!x) return;
+  const r = hsRange(); let raw = [];
+  if (SRV.on) {
+    const q = await sb.from('hs_reports').select('kind,rep_date,k,data').eq('rider_id', rid).gte('rep_date', r.from).lte('rep_date', r.to).order('rep_date', { ascending: false }).range(0, 1999);
+    raw = q.error ? [] : q.data.map(z => ({ kind: z.kind, d: z.rep_date, k: z.k, data: z.data }));
+  } else raw = hsLocal().filter(z => z.r === rid && z.d >= r.from && z.d <= r.to);
+  const byDay = new Map();
+  raw.forEach(z => {
+    const day = byDay.get(z.d) || {}; byDay.set(z.d, day);
+    if (z.kind === 'perf' || z.kind === 'distance') for (const [k, v] of Object.entries(z.data || {})) if (typeof v === 'number') day[z.kind + '.' + k] = (day[z.kind + '.' + k] || 0) + v;
+    if (z.kind === 'actions') (day.actions = day.actions || []).push((z.data || {}).issue_ar || (z.data || {}).issue);
+    if (z.kind === 'wallet') day.wallet = (z.data || {}).current_wallet;
+  });
+  const g = (day, k) => n2(day[k]);
+  const kv = [[t('hsr.notified'), n2(x.notified)], [t('hsr.completed'), n2(x.completed)], [t('hsr.accepted'), n2(x.accepted)], [t('hsr.declined'), n2(x.declined)], [t('hsr.cancelled'), n2(x.cancelled)], [t('hsr.notAccepted'), n2(x.not_accepted)],
+    [t('hs.accept'), x.accept !== undefined ? x.accept + '%' : '—'], [t('hs.shifts'), n2(x.shifts)], [t('hsr.days'), n2(x.days)], [t('hsr.plannedH'), n2(x.planned_h)], [t('hsr.workH'), n2(x.actual_h)], [t('hsr.lostH'), n2(x.lost_h)], [t('hsr.breakH'), n2(x.break_h)], [t('hsr.noShows'), n2(x.no_shows)],
+    [t('hsr.kmTotal'), n2(x.km_total)], [t('hsr.kmPay'), n2(x.km_pay)], [t('hsr.wallet'), x.wallet !== undefined ? `${money(x.wallet)}${x.wallet_at ? ' · ' + fmtDate(x.wallet_at) : ''}` : '—'],
+    [t('hsr.seg'), x.segment ? `${x.segment}${x.dq !== undefined ? ' · ' + r2(x.dq * 100) + '%' : ''}` : '—'], [t('hsr.qMonth'), x.q_gross !== undefined ? `${nf(x.q_completed ?? 0)} / ${nf(x.q_gross)} · ${t('hsr.failed')} ${nf(x.q_failed ?? 0)}` : '—'],
+    [t('hsr.contract'), [x.contract, x.vehicle, x.city].filter(Boolean).join(' · ') || '—']];
+  if (seesEntitlement()) { const e = entOf(x); kv.push([t('fin.entSub'), SAR(money(e.sub))], [t('fin.entTotal'), SAR(money(e.total))]); }
+  const days = [...byDay.keys()].sort().reverse();
+  const table = days.length ? `<div class="tw"><table><thead><tr>${[t('req.date'), t('hsr.notified'), t('hsr.completed'), t('hsr.declined'), t('hsr.workH'), t('hsr.lostH'), t('hsr.breakH'), t('hsr.kmPay'), t('hsr.wallet'), t('hs.notes')].map(k => `<th>${esc(k)}</th>`).join('')}</tr></thead><tbody>${days.map(dd => { const day = byDay.get(dd); return `<tr><td><b>${esc(fmtDate(dd))}</b></td><td>${g(day, 'perf.notified_deliveries')}</td><td><b>${g(day, 'perf.completed_deliveries')}</b></td><td>${g(day, 'perf.declined_deliveries')}</td><td>${g(day, 'perf.actual_working_hours')}</td><td>${g(day, 'perf.lost_hours')}</td><td>${g(day, 'perf.break_hours')}</td><td>${g(day, 'distance.payable_km')}</td><td>${day.wallet !== undefined ? esc(money(day.wallet)) : '—'}</td><td class="sm" style="max-width:240px">${esc((day.actions || []).join(' · ') || '—')}</td></tr>`; }).join('')}</tbody></table></div>` : `<div class="mut">${esc(t('hsr.noDays'))}</div>`;
+  const acts = (x.actions || []).length ? `<h4 style="margin:20px 0 6px">${esc(t('hsr.actions'))}</h4><div class="list">${x.actions.map(a => `<div class="kv"><span>${esc(fmtDate(a.d))} · ${esc(a.i || a.ie || '')}</span><b style="font-weight:500">${esc(a.a || '')}</b></div>`).join('')}</div>` : '';
+  openModal({
+    title: x.name, desc: `${t('hsr.riderNo')} ${rid} · ${fmtDate(r.from)} – ${fmtDate(r.to)}`, size: 'xl',
+    body: `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:0 22px">${kv.map(([k, v]) => `<div class="kv"><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join('')}</div><h4 style="margin:20px 0 6px">${esc(t('hsr.daily'))}</h4>${table}${acts}`,
+    extraFoot: !x.empId && canEdit('people') && !isField(user()) ? btn('hsLink', t('hsr.link'), { icon: 'link', data: { r: rid } }) : ''
+  });
+};
+/* link a HungerStation rider number to an employee file */
+A_.hsLink = d => {
+  const rid = String(d.r || ''); if (!/^\d{1,15}$/.test(rid)) return;
+  const free = DB.employees.filter(e => !String(e.rider || '').trim()).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  if (!free.length) { toast(t('hsr.noFree'), 'warn'); return; }
+  openModal({ title: t('hsr.link'), desc: `${t('hsr.riderNo')} ${rid}`, size: 'sm', submit: t('act.save'),
+    fields: [{ id: 'emp', label: t('emp.name'), type: 'select', req: true, wide: true, opts: [['', '—'], ...free.map(e => [e.id, `${e.name} · ${e.id}`])] }],
+    onSubmit: v => { const e = emp(v.emp); if (!e) return t('err.required'); e.rider = rid; save(); toast(t('toast.saved')); render(); return true; } });
+};
+/* remove one day that was uploaded by mistake (all five reports of that day) */
+A_.hsClearDay = () => openModal({
+  title: t('hsr.clearDay'), desc: t('hsr.clearDayD'), size: 'sm', submit: t('act.delete'), danger: true,
+  fields: [{ id: 'date', label: t('req.date'), type: 'date', req: true, value: (HS.data && HS.data.last && HS.data.last.perf) || yday(), wide: true }],
+  onSubmit: v => {
+    (async () => {
+      if (SRV.on) { const x = await sb.rpc('hs_clear_day', { p_date: v.date }); if (x.error) { toast(t('sync.denied'), 'bad'); return; } }
+      else localStorage.setItem(HS_LOCAL, JSON.stringify(hsLocal().filter(z => z.d !== v.date)));
+      toast(t('toast.deleted'), 'warn'); HS.rev++; HS.key = ''; render();
+    })();
+    return true;
+  }
+});
 
 /* ================= FINANCE: payments, settlements, e-receipt vouchers ================= */
 ICONS.star = '<path d="M12 2l3.1 6.3 6.9 1-5 4.9 1.2 6.8L12 17.8 5.8 21l1.2-6.8-5-4.9 6.9-1z"/>';
@@ -2418,7 +2679,7 @@ function finVouchersTab() {
   return `<div class="toolbar">${searchBox('finance', t('fin.search'))}<div class="acts">${btn('pdfReport', t('rep.pdf'), { cls: 'sm', icon: 'file-pdf', data: { k: 'vouchers' } })}</div></div>${list.length ? `<div class="tw"><table><thead><tr><th>${esc(t('fin.voucherNo'))}</th><th>${esc(t('req.date'))}</th><th>${esc(t('req.type'))}</th><th>${esc(t('fin.party'))}</th><th>${esc(t('req.amount'))}</th><th>${esc(t('fin.refDoc'))}</th><th>${esc(t('docs.status'))}</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : emptyState(t('fin.emptyVouT'), t('fin.emptyVouD'))}`;
 }
 function finEntitlementTab() {
-  const o = DB.ops, k = rates();
+  const o = OPS(), k = rates();
   if (!o || !o.rows.length) return emptyState(t('fin.emptyEntT'), t('fin.emptyEntD'));
   const x = entTotals(), orders = o.rows.reduce((s, r) => s + r.orders, 0), km = o.rows.reduce((s, r) => s + (r.km || 0), 0);
   const kv = [[t('fin.rateOrder'), `${SAR(k.order)}`], [t('fin.rateKm'), `${SAR(k.km)}`], [t('hs.orders'), nf(orders)], [t('hs.km'), nf(r2(km))], [t('fin.entOrders'), SAR(money(x.orders))], [t('fin.entKm'), SAR(money(x.km))], [t('fin.exclVat'), SAR(money(x.sub))], [`${t('fin.vat')} ${k.vat}%`, SAR(money(x.vat))], [t('fin.inclVat'), SAR(money(x.total))]];
@@ -2730,7 +2991,7 @@ async function pull(force) {
     const db = await fetchAll();
     if (!force && (SRV.dirty || SRV.inflight)) return;
     SRV.stamp = stamp;
-    if (!force && norm(db) === norm(DB)) return;
+    if (!force && norm(db) === norm(DB)) { if (HS.key) render(); return; }
     adopt(db); render();
   } catch (e) {}
 }
@@ -3062,7 +3323,7 @@ emp.phone|Phone|الجوال
 emp.email|Email|البريد الإلكتروني
 emp.joined|Joining date|تاريخ المباشرة
 emp.annual|Annual leave days|أيام الإجازة السنوية
-emp.rider|Courier ID|رقم المندوب
+emp.rider|HungerStation rider ID|رقم المندوب في هنقرستيشن (Rider ID)
 emp.docs|Documents|الوثائق
 emp.vehicle|Vehicle|المركبة
 emp.add|Add employee|إضافة موظف
@@ -3569,6 +3830,72 @@ hs.ratedN|{n} rated couriers|{n} مندوب مُقيَّم
 hs.detected|Columns detected|الأعمدة المكتشفة
 hs.mine|My performance|أدائي
 hs.mineSub|From the HungerStation report|من تقرير هنقرستيشن
+hsr.desc|HungerStation daily reports, kept day by day. Each upload adds its days; totals add up over the chosen period.|تقارير هنقرستيشن اليومية محفوظة يوماً بيوم. كل رفع يضيف أيامه، والمجاميع تتراكم حسب الفترة المختارة.
+hsr.upload|Upload daily reports|رفع تقارير اليوم
+hsr.k.perf|Performance|الأداء
+hsr.k.quality|Quality / segment|التقييم والفئة
+hsr.k.wallet|Wallet|المحفظة
+hsr.k.distance|Distance|المسافات
+hsr.k.actions|Operational notes|الملاحظات التشغيلية
+hsr.importT|Add HungerStation reports|إضافة تقارير هنقرستيشن
+hsr.importD|These days are added to the record. A day uploaded again replaces only that day.|تُضاف هذه الأيام إلى السجل. اليوم الذي يُرفع مرة ثانية يُستبدل وحده فقط.
+hsr.importGo|Add to record|إضافة للسجل
+hsr.rowsN|{n} rows|{n} صف
+hsr.skipped|Not a HungerStation report, skipped: {f}|ليست تقارير هنقرستيشن وتم تجاهلها: {f}
+hsr.repDate|Report date (performance, quality, wallet)|تاريخ التقرير (الأداء، التقييم، المحفظة)
+hsr.repDateHint|These files carry no date; distance and notes files keep their own dates.|هذه الملفات بلا تاريخ؛ ملفات المسافات والملاحظات تحتفظ بتواريخها.
+hsr.future|The report date cannot be in the future|لا يمكن أن يكون تاريخ التقرير في المستقبل
+hsr.none|No HungerStation report was recognised in these files|لم يتم التعرف على تقارير هنقرستيشن في هذه الملفات
+hsr.fail|Some reports could not be saved|تعذر حفظ بعض التقارير
+hsr.done|{n} rows added to the record|تمت إضافة {n} صف إلى السجل
+hsr.pYday|Yesterday|أمس
+hsr.p7|Last 7 days|آخر 7 أيام
+hsr.pMonth|This month|هذا الشهر
+hsr.pPrev|Last month|الشهر الماضي
+hsr.period|Period|الفترة
+hsr.lastUp|Last update:|آخر تحديث:
+hsr.emptyT|No reports in this period|لا توجد تقارير في هذه الفترة
+hsr.emptyD|Choose another period or upload the day's reports.|اختر فترة أخرى أو ارفع تقارير اليوم.
+hsr.loading|Loading the reports…|جارٍ تحميل التقارير…
+hsr.active|Active couriers|المناديب النشطون
+hsr.ofRiders|of {n} in the reports|من {n} في التقارير
+hsr.completed|Completed orders|الطلبات المنفذة
+hsr.notified|Assigned orders|الطلبات المسندة
+hsr.accepted|Accepted|المقبولة
+hsr.declined|Declined orders|الطلبات المرفوضة
+hsr.cancelled|Cancelled|الملغاة
+hsr.notAccepted|Not accepted|غير المقبولة
+hsr.ofNotified|of {n} assigned|من {n} مسندة
+hsr.acceptRate|Acceptance {n}%|نسبة القبول {n}%
+hsr.workH|Working hours|ساعات العمل
+hsr.plannedH|Planned hours|الساعات المخططة
+hsr.ofPlanned|of {n} planned|من {n} مخططة
+hsr.lostH|Lost hours|الساعات الضائعة
+hsr.breakH|Break hours|ساعات البريك
+hsr.breakFoot|Break {n} h|البريك {n} ساعة
+hsr.kmPay|Payable km|الكيلومترات المدفوعة
+hsr.kmTotal|Total km|إجمالي الكيلومترات
+hsr.ofKm|of {n} km driven|من {n} كم مقطوعة
+hsr.wallet|Wallet|المحفظة
+hsr.walletFoot|Latest balance with HungerStation|آخر رصيد لدى هنقرستيشن
+hsr.seg|Segment|الفئة
+hsr.daily|Day by day|الإنجاز اليومي
+hsr.dailySub|Totals for each reported day|مجاميع كل يوم مرفوع
+hsr.rankSub|Totals for the chosen period · tap a courier for his days|مجاميع الفترة المختارة · اضغط على المندوب لعرض أيامه
+hsr.unlinked|not linked to an employee|غير مربوط بموظف
+hsr.riderNo|Rider ID|رقم المندوب
+hsr.days|Working days|أيام العمل
+hsr.noShows|No-shows|الغياب
+hsr.qMonth|Month quality (completed / gross)|جودة الشهر (المنفذة / الإجمالية)
+hsr.failed|failed|فاشلة
+hsr.contract|Contract · vehicle · city|العقد · المركبة · المدينة
+hsr.noDays|No days in this period|لا توجد أيام في هذه الفترة
+hsr.actions|Operational notes|الملاحظات التشغيلية
+hsr.link|Link to employee|ربط بموظف
+hsr.noFree|Every employee file already has a rider ID|كل ملفات الموظفين لديها رقم مندوب
+hsr.clearDay|Delete a day|حذف يوم
+hsr.clearDayD|Removes every HungerStation report of that day so it can be uploaded again.|يحذف كل تقارير هنقرستيشن لذلك اليوم لإعادة رفعها.
+hsr.dailyBtn|Day by day|التفاصيل اليومية
 fin.desc|Pay approved requests, settle custody and maintenance balances, and issue electronic receipt vouchers.|اصرف الطلبات المعتمدة، وصفِّ العهد وأرصدة الصيانة، وأصدر سندات القبض الإلكترونية.
 fin.rates|Entitlement rates|أسعار الاستحقاق
 fin.ratesDesc|Amounts per order and per kilometre, excluding VAT.|المبالغ لكل طلب ولكل كيلومتر بدون الضريبة.
@@ -3783,7 +4110,7 @@ function movePill() {
   const p = b.parentElement.querySelector('.pill'); p.style.height = b.offsetHeight + 'px'; p.style.transform = `translateY(${b.offsetTop}px)`; p.style.opacity = 1;
 }
 /* actions that need more than edit access (permissions document) */
-const GATE = { resetEmpPw: () => canFull('people'), addEmp: () => canFull('people'), delEmp: () => canFull('people'), adjBalance: () => canFull('people'), delVeh: () => canFull('fleet'), delLic: () => canFull('licenses'), maintAccept: () => canApprove('fleet'), maintDecline: () => canApprove('fleet') };
+const GATE = { hsClearDay: () => canFull('ops'), hsLink: () => canEdit('people'), resetEmpPw: () => canFull('people'), addEmp: () => canFull('people'), delEmp: () => canFull('people'), adjBalance: () => canFull('people'), delVeh: () => canFull('fleet'), delLic: () => canFull('licenses'), maintAccept: () => canApprove('fleet'), maintDecline: () => canApprove('fleet') };
 function gateActs(root) { for (const a in GATE) if (!GATE[a]()) $$(`[data-act="${a}"]`, root).forEach(b => b.remove()); }
 for (const a in GATE) { const f = A_[a]; if (f) A_[a] = d => (GATE[a]() ? f(d) : toast(t('err.noaccess'), 'warn')); }
 function render(animate) {
@@ -3860,7 +4187,7 @@ document.addEventListener('change', e => {
   const el = e.target;
   if (el.dataset && el.dataset.fp) { addFiles(el.dataset.fp, [...el.files]); el.value = ''; return; }
   if (el.id === 'userSel') { CUR = el.value; setPref('user', CUR); if (!canView(UI.page)) UI.page = firstPage(); render(true); return; }
-  if (el.id === 'opsfile') { handleOpsFile(el.files[0]); el.value = ''; return; }
+  if (el.id === 'opsfile') { handleOpsFiles(el.files); el.value = ''; return; }
   if (el.id === 'jsonfile') {
     const f = el.files[0]; if (!f) return; const r = new FileReader();
     r.onload = () => { try { const o = JSON.parse(r.result); if (!Array.isArray(o.employees)) throw 0; DB = Object.assign(defaults(), o); save(); toast(t('set.imported')); render(true); } catch (x) { toast(t('set.badFile'), 'bad'); } };
@@ -3887,7 +4214,7 @@ document.addEventListener('pointermove', e => {
   const z = e.target.closest && e.target.closest('#dropzone'); if (!z) return;
   e.preventDefault();
   if (ev === 'dragover') z.classList.add('over'); else z.classList.remove('over');
-  if (ev === 'drop' && e.dataTransfer.files[0]) handleOpsFile(e.dataTransfer.files[0]);
+  if (ev === 'drop' && e.dataTransfer.files.length) handleOpsFiles(e.dataTransfer.files);
 }));
 window.addEventListener('resize', () => requestAnimationFrame(movePill));
 setInterval(() => { const c = $('#clock'); if (c) c.textContent = clockText(); }, 30000);
