@@ -265,6 +265,8 @@ html[dir="rtl"] .eyebrow{direction:rtl}
 .search .ic{position:absolute;inset-inline-start:14px;top:50%;transform:translateY(-50%);color:var(--mut);font-size:18px;pointer-events:none}
 .search input{padding-inline-start:44px}
 .fchips{display:flex;gap:7px;flex-wrap:wrap}
+.drange{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.drange label{display:flex;align-items:center;gap:6px}.drange span{font-size:12.5px;color:var(--mut);font-weight:600}.drange .in{width:158px;height:44px;padding-block:0}
+@media(max-width:640px){.drange{width:100%;display:grid;grid-template-columns:1fr 1fr auto;align-items:end}.drange label{flex-direction:column;align-items:stretch;gap:4px;min-width:0}.drange .in{width:100%;min-width:0}.drange .iconbtn{height:44px;width:44px}}
 .fchips button{height:34px;padding:0 15px;border-radius:99px;border:1px solid var(--gb);background:var(--glass2);color:var(--mut);font-weight:600;font-size:12.5px;transition:all .3s var(--ease)}
 .fchips button:hover{color:var(--ink);border-color:var(--gb2)}
 .fchips button.on{background:var(--ink);color:var(--bg0);border-color:transparent}
@@ -900,6 +902,17 @@ function tabsBar(page, list) {
 function searchBox(page, ph) {
   return `<div class="search">${ic('search')}<input class="in" id="q-${page}" data-search="${page}" placeholder="${esc(ph)}" value="${esc(UI.q[page] || '')}" autocomplete="off"></div>`;
 }
+/* a request matches by its number (REQ-0005 or just 5), the employee number, the name, the title or the date */
+function reqMatch(r, raw) {
+  const q = String(raw || '').trim().toLowerCase(); if (!q) return true;
+  const e = r.empId ? emp(r.empId) : null, u = r.createdBy ? DB.users.find(z => z.id === r.createdBy) : null;
+  if (/^\d+$/.test(q) && Number(String(r.id).replace(/\D/g, '')) === Number(q)) return true;
+  return [r.id, r.empId, u && u.empId, r.from, e && e.name, reqTitle(r), r.date].filter(Boolean).join(' ').toLowerCase().includes(q);
+}
+function dateRange(page) {
+  const d = UI.dr[page] || {};
+  return `<div class="drange"><label><span>${esc(t('af.from'))}</span><input type="date" class="in" data-drange="${page}" data-k="from" value="${esc(d.from || '')}" max="${esc(d.to || '')}"></label><label><span>${esc(t('af.to'))}</span><input type="date" class="in" data-drange="${page}" data-k="to" value="${esc(d.to || '')}" min="${esc(d.from || '')}"></label>${d.from || d.to ? `<button class="iconbtn sm" data-act="clearRange" data-page="${page}" title="${esc(t('af.clearDates'))}" aria-label="${esc(t('af.clearDates'))}">${ic('x')}</button>` : ''}</div>`;
+}
 const matchQ = (page, ...fields) => { const q = (UI.q[page] || '').trim().toLowerCase(); return !q || fields.join(' ').toLowerCase().includes(q); };
 
 function ring(p, label, color, dark = true) {
@@ -1054,7 +1067,7 @@ function runCmd(i) { const it = CMD.items[i]; if (!it) return; closeCmdk(); setT
 function closeCmdk() { $('#cmdRoot').innerHTML = ''; }
 
 /* ================= pages & actions ================= */
-const UI = { page: 'overview', tab: {}, q: {}, flt: {} };
+const UI = { page: 'overview', tab: {}, q: {}, flt: {}, dr: {} };
 const A_ = {};
 const PAGE_ICON = { overview: 'layout', people: 'users', fleet: 'truck', ops: 'activity', licenses: 'shield', approvals: 'circle-check', reports: 'chart', alerts: 'bell', portal: 'user-circle', users: 'user-cog', settings: 'settings' };
 const TYPE_TONE = { iqama_renew: ['shield', 't-cy'], license_renew: ['shield', 't-vi'], hire_courier: ['user', 't-gr'], expense: ['receipt', 't-co'], notice: ['bell', 't-co'], leave: ['calendar', 't-cy'], advance: ['receipt', 't-sa'], general: ['file', 't-bl'], task: ['clipboard', 't-vi'], balance: ['calendar-plus', 't-cy'], custody: ['briefcase', 't-vi'], parts: ['package', 't-sa'], custody_maint: ['wallet', 't-co'] };
@@ -1647,7 +1660,8 @@ function pgFleet() {
   const act = canEdit('fleet') ? btn('newMaint', t('mnt.new'), { icon: 'wrench' }) + btn('addVeh', t('veh.add'), { cls: 'pri', icon: 'plus' }) : '';
   return `<div class="pg">${phead(t('page.fleet'), t('fleet.desc'), act)}${tabsBar('fleet', [['vehicles', t('tab.vehicles'), DB.vehicles.length], ['maint', t('tab.maint'), DB.maint.filter(m => ['requested', 'open', 'purchased'].includes(m.status)).length]])}<div>${body}</div></div>`;
 }
-A_.flt = d => { UI.flt[d.page] = d.v; render(); };
+A_.flt = d => { UI.flt[d.page] = d.page === 'approvals' && UI.flt[d.page] === d.v ? 'all' : d.v; render(); };
+A_.clearRange = d => { UI.dr[d.page] = {}; render(); };
 
 /* ================= OPERATIONS ================= */
 function parseCSV(text) {
@@ -1743,9 +1757,10 @@ function pgApprovals() {
   const all = DB.requests.slice().reverse();
   const hit = (r, k) => k === 'all' || (k === 'tasks' ? r.type === 'task' : k === 'mine' ? mine(r) : r.status === k);
   const cnt = k => all.filter(r => hit(r, k)).length;
-  const list = all.filter(r => hit(r, f) && matchQ('approvals', reqTitle(r), r.from, r.id));
+  const dr = UI.dr.approvals || {};
+  const list = all.filter(r => hit(r, f) && reqMatch(r, UI.q.approvals) && (!dr.from || (r.date || '') >= dr.from) && (!dr.to || (r.date || '') <= dr.to));
   return `<div class="pg">${phead(t('page.approvals'), t('appr.desc'), btn('newReq', t('req.new'), { cls: 'pri', icon: 'plus' }))}
-    <div class="toolbar">${searchBox('approvals', t('appr.search'))}<div class="fchips">${['all', 'mine', 'pending', 'approved', 'rejected', 'tasks'].map(k => `<button class="${f === k ? 'on' : ''}" data-act="flt" data-page="approvals" data-v="${k}">${esc(t('af.' + k))} · ${cnt(k)}</button>`).join('')}</div></div>
+    <div class="toolbar">${searchBox('approvals', t('appr.search'))}${dateRange('approvals')}<div class="fchips">${['mine', 'pending', 'approved', 'rejected', 'tasks'].map(k => `<button class="${f === k ? 'on' : ''}" data-act="flt" data-page="approvals" data-v="${k}">${esc(t('af.' + k))} · ${cnt(k)}</button>`).join('')}</div></div>
     ${list.length ? `<div class="list stag">${list.map(reqCard).join('')}</div>` : card(emptyState(all.length ? t('empty.noMatch') : t('req.emptyT'), all.length ? '' : t('req.emptyD'), !all.length ? btn('newReq', t('req.new'), { cls: 'pri', icon: 'plus' }) : ''))}</div>`;
 }
 
@@ -1883,7 +1898,7 @@ A_.setLang = d => { LANG = d.v; setPref('lang', LANG); render(true); };
 A_.setTheme = d => { THEME = d.v; setPref('theme', THEME); applyShell(); render(); };
 A_.exportJSON = () => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(DB, null, 1)], { type: 'application/json' })); a.download = `oceanrise-backup-${today()}.json`; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 600); toast(t('set.exported')); };
 A_.importJSON = () => $('#jsonfile')?.click();
-A_.resetAll = () => confirmBox({ title: t('set.reset'), text: t('set.resetConfirm'), ok: t('set.reset'), onOk: () => { DB = defaults(); CUR = DB.users[0].id; setPref('user', CUR); save(); UI.tab = {}; UI.q = {}; UI.flt = {}; go('overview'); toast(t('set.resetDone')); } });
+A_.resetAll = () => confirmBox({ title: t('set.reset'), text: t('set.resetConfirm'), ok: t('set.reset'), onOk: () => { DB = defaults(); CUR = DB.users[0].id; setPref('user', CUR); save(); UI.tab = {}; UI.q = {}; UI.flt = {}; UI.dr = {}; go('overview'); toast(t('set.resetDone')); } });
 function pgSettings() {
   const segBtn = (act, cur, v, label) => `<button class="btn ${cur === v ? 'pri' : ''}" data-act="${act}" data-v="${v}">${esc(label)}</button>`;
   return `<div class="pg">${phead(t('page.settings'), t('set.desc'))}
@@ -3176,7 +3191,10 @@ lic.pageDesc|Every company license with a live countdown to its expiry.|كل ت�
 lic.emptyT|No licenses yet|لا توجد تراخيص بعد
 lic.emptyD|Add your commercial registration, municipality and other permits.|أضف السجل التجاري ورخصة البلدية وغيرها من التصاريح.
 appr.desc|Every request and its journey through the approval workflow.|كل الطلبات ورحلتها عبر مسار الاعتماد.
-appr.search|Search requests…|ابحث في الطلبات…
+appr.search|Request no., employee no. or name…|رقم الطلب أو الرقم الوظيفي أو الاسم…
+af.from|From|من
+af.to|To|إلى
+af.clearDates|Clear dates|مسح التاريخ
 af.all|All|الكل
 af.pending|Pending|قيد الاعتماد
 af.approved|Approved|معتمدة
@@ -3804,6 +3822,10 @@ document.addEventListener('click', e => {
   if (e.target.id === 'cback') { closeCmdk(); return; }
   const el = e.target.closest('[data-act]');
   if (el && A_[el.dataset.act]) { e.preventDefault(); A_[el.dataset.act](el.dataset, e); }
+});
+document.addEventListener('change', e => {
+  const el = e.target; if (!el.dataset || !el.dataset.drange) return;
+  const pg = el.dataset.drange; UI.dr[pg] = { ...(UI.dr[pg] || {}), [el.dataset.k]: el.value }; render();
 });
 document.addEventListener('input', e => {
   const el = e.target;
