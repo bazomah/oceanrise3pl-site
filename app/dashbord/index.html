@@ -2216,7 +2216,8 @@ function hsKV(e) {
 const HS = { key: '', data: null, busy: false, rev: 0, view: null, vkey: '' };
 const HS_LOCAL = 'oceanrise.hs';
 const hsLocal = () => { try { return JSON.parse(localStorage.getItem(HS_LOCAL) || '[]'); } catch (e) { return []; } };
-const hsKeyOf = h => String(h ?? '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+const HS_ALIAS = { riderid: 'rider_id', rider_number: 'rider_id', rider_no: 'rider_id', rider_code: 'rider_id' };
+const hsKeyOf = h => { const k = String(h ?? '').replace(/^\uFEFF/, '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, ''); return HS_ALIAS[k] || k; };
 const HS_MON = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
 const yday = () => iso(new Date(Date.now() - 864e5));
 function hsDate(v) {
@@ -2258,14 +2259,27 @@ async function readMatrix(file) {
   if (/\.(xlsx|xls)$/i.test(file.name)) { const X = await loadXLSX(); const wb = X.read(await file.arrayBuffer()); return X.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' }); }
   return parseCSV(await file.text());
 }
+/* a date written in the file name, e.g. Riders_Performance_2026-11-15.csv, 15-11-2026, Nov 15 2026 */
+function hsNameDate(name) {
+  const n = String(name || '').replace(/\.[a-z0-9]+$/i, ''); let m;
+  if ((m = n.match(/(20\d\d)[-_.](\d{1,2})[-_.](\d{1,2})/))) return hsDate(`${m[1]}-${m[2]}-${m[3]}`);
+  if ((m = n.match(/(\d{1,2})[-_.](\d{1,2})[-_.](20\d\d)/))) return hsDate(`${m[1]}/${m[2]}/${m[3]}`);
+  if ((m = n.match(/([A-Za-z]{3})[A-Za-z]*[\s_-]+(\d{1,2})[\s_,-]+(20\d\d)/))) return hsDate(`${m[1]} ${m[2]}, ${m[3]}`);
+  if ((m = n.match(/(\d{1,2})[\s_-]+([A-Za-z]{3})[A-Za-z]*[\s_-]+(20\d\d)/))) return hsDate(`${m[1]} ${m[2]} ${m[3]}`);
+  return null;
+}
+const HS_ORDER = ['perf', 'quality', 'wallet', 'distance', 'actions'];
 async function handleOpsFiles(picked) {
   const files = [...(picked || [])]; if (!files.length) return;
   const got = [], other = [];
-  for (const f of files) { try { const p = hsParse(await readMatrix(f)); if (p) got.push({ name: f.name, ...p }); else other.push(f); } catch (e) { other.push(f); } }
+  for (const f of files) { try { const p = hsParse(await readMatrix(f)); if (p) got.push({ name: f.name, fdate: hsNameDate(f.name), ...p }); else other.push(f); } catch (e) { other.push(f); } }
   if (!got.length) { if (files.length === 1) return handleOpsFile(files[0]); toast(t('hsr.none'), 'warn'); return; }
+  got.sort((a, b) => HS_ORDER.indexOf(a.kind) - HS_ORDER.indexOf(b.kind) || String(a.fdate || '').localeCompare(String(b.fdate || '')) || a.name.localeCompare(b.name));
   const dated = got.flatMap(g => g.rows.map(r => r.d).filter(Boolean)).sort();
   const def = dated.length ? dated[dated.length - 1] : yday();
-  const needsDate = got.some(g => g.rows.some(r => !r.d));
+  const undated = got.map((g, i) => [g, i]).filter(([g]) => g.rows.some(r => !r.d));
+  const have = new Set(got.map(g => g.kind));
+  const check = `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">${HS_ORDER.map(k => chip(`${have.has(k) ? '✓' : '—'} ${t('hsr.k.' + k)}`, have.has(k) ? 'ok' : 'warn')).join('')}</div>`;
   const info = got.map(g => {
     const ds = [...new Set(g.rows.map(r => r.d).filter(Boolean))].sort();
     const when = ds.length ? ' · ' + (ds.length > 1 ? `${fmtDate(ds[0])} – ${fmtDate(ds[ds.length - 1])}` : fmtDate(ds[0])) : '';
@@ -2273,14 +2287,17 @@ async function handleOpsFiles(picked) {
   }).join('') + (other.length ? `<div class="mut sm" style="margin-top:8px">${esc(t('hsr.skipped', { f: other.map(f => f.name).join(' · ') }))}</div>` : '');
   openModal({
     title: t('hsr.importT'), desc: t('hsr.importD'), size: 'md', submit: t('hsr.importGo'),
-    pre: `<div class="list" style="margin-bottom:14px">${info}</div>`,
-    fields: needsDate ? [{ id: 'date', label: t('hsr.repDate'), type: 'date', req: true, value: def, wide: true, hint: t('hsr.repDateHint') }] : [],
-    onSubmit: v => { const d = v.date || def; if (d > today()) return t('hsr.future'); hsImport(got, d); return true; }
+    pre: `${check}<div class="list" style="margin-bottom:14px">${info}</div>`,
+    fields: undated.map(([g, i]) => ({ id: 'd' + i, label: `${t('hsr.repDateOf')} ${t('hsr.k.' + g.kind)} · ${g.name}`, type: 'date', req: true, value: g.fdate || def, wide: true, hint: g.fdate ? t('hsr.fromName') : t('hsr.repDateHint') })),
+    onSubmit: v => {
+      for (const [, i] of undated) { const d = v['d' + i]; if (!d) return t('err.required'); if (d > today()) return t('hsr.future'); got[i].date = d; }
+      hsImport(got, def); return true;
+    }
   });
 }
 async function hsImport(got, date) {
   const by = {};
-  got.forEach(g => g.rows.forEach(r => (by[g.kind] = by[g.kind] || []).push({ d: r.d || date, r: r.r, k: r.k, data: r.data })));
+  got.forEach(g => g.rows.forEach(r => (by[g.kind] = by[g.kind] || []).push({ d: r.d || g.date || date, r: r.r, k: r.k, data: r.data })));
   let n = 0, bad = 0;
   for (const [kind, rows] of Object.entries(by)) {
     if (SRV.on) {
@@ -3851,7 +3868,9 @@ hsr.importGo|Add to record|إضافة للسجل
 hsr.rowsN|{n} rows|{n} صف
 hsr.skipped|Not a HungerStation report, skipped: {f}|ليست تقارير هنقرستيشن وتم تجاهلها: {f}
 hsr.repDate|Report date (performance, quality, wallet)|تاريخ التقرير (الأداء، التقييم، المحفظة)
-hsr.repDateHint|These files carry no date; distance and notes files keep their own dates.|هذه الملفات بلا تاريخ؛ ملفات المسافات والملاحظات تحتفظ بتواريخها.
+hsr.repDateOf|Report date:|تاريخ تقرير
+hsr.fromName|Taken from the file name; change it if it is wrong.|مأخوذ من اسم الملف؛ عدّله إذا كان غير صحيح.
+hsr.repDateHint|This file carries no date. Choose the day it covers; distance and notes files keep their own dates.|هذا الملف بلا تاريخ. اختر اليوم الذي يخصه؛ ملفات المسافات والملاحظات تحتفظ بتواريخها.
 hsr.future|The report date cannot be in the future|لا يمكن أن يكون تاريخ التقرير في المستقبل
 hsr.none|No HungerStation report was recognised in these files|لم يتم التعرف على تقارير هنقرستيشن في هذه الملفات
 hsr.fail|Some reports could not be saved|تعذر حفظ بعض التقارير
