@@ -518,6 +518,23 @@ html[dir="rtl"] .ic.flip svg{transform:scaleX(-1)}
   .modal{padding:22px;border-radius:26px}
   .toasts{inset-inline:14px}
 }
+/* phones: the side menu scrolls inside itself so every item (users & permissions, settings) is reachable
+   even while the browser toolbar is showing; tighter rows so most screens need no scrolling at all */
+@media(max-width:980px){
+  .rail{top:max(10px,env(safe-area-inset-top));bottom:max(10px,env(safe-area-inset-bottom));padding-top:12px;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+  .rail::-webkit-scrollbar{display:none}
+  .rail .brandrow{min-height:54px;padding-bottom:6px}
+  .rail .logo{width:48px;height:48px;border-radius:14px}
+  .rail .navlabel{padding:10px 14px 4px}
+  .rail .nav{gap:2px}
+  .rail .nav button{height:42px}
+  .rail .railfoot{padding:10px 8px 18px}
+  .rail .railwaves{position:sticky;bottom:0;height:56px;margin:-56px -14px 0;flex-shrink:0}
+}
+/* phones: same padding on both sides of the top bar so its buttons sit centred and evenly spaced */
+@media(max-width:700px){
+  html[dir] .topbar{padding:0 10px;justify-content:space-between}
+}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important}}
 
 .modal.xl{width:min(900px,100%)}
