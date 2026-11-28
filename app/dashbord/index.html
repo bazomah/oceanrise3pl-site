@@ -548,6 +548,15 @@ html[dir="rtl"] .ic.flip svg{transform:scaleX(-1)}
 @media(max-width:700px){
   html[dir] .topbar{padding:0 10px;justify-content:space-between}
 }
+/* phones: the logout button stands on its own like the other buttons (the name is already in the greeting),
+   so the bar is symmetric and the language switch sits exactly in the middle */
+@media(max-width:520px){
+  body.srv .userchip .avatar,body.srv #uAvatar{display:none!important}
+  body.srv .userchip{border:0;background:none;padding:0;height:auto;gap:0}
+  body.srv .userchip .iconbtn.sm{width:38px;height:38px;border-radius:14px;font-size:19px}
+}
+/* tablets and laptops: equal padding on both ends of the top bar */
+@media(min-width:701px){html[dir] .topbar{padding:0 16px}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important}}
 
 .modal.xl{width:min(900px,100%)}
