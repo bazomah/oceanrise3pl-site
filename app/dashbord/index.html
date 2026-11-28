@@ -1693,19 +1693,47 @@ function matrixToOps(m) {
   data.forEach(r => { const n = String(r[nc] ?? '').trim(); const o = Number(String(r[oc] ?? '').replace(/,/g, '')); if (n && !isNaN(o)) map.set(n, (map.get(n) || 0) + o); });
   return [...map].map(([name, orders]) => ({ name, orders })).sort((a, b) => b.orders - a.orders);
 }
+/* SheetJS 0.20.3 from the vendor's CDN, pinned by hash (0.18.5 had CVE-2023-30533 and CVE-2024-22363) */
+const XLSX_SRC = 'https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js';
+const XLSX_SRI = 'sha384-EnyY0/GSHQGSxSgMwaIPzSESbqoOLSexfnSMN2AP+39Ckmn92stwABZynq1JyzdT';
+// read values only: no formulas, no HTML, no styles, at most 20,000 rows
+const XLSX_OPTS = { cellFormula: false, cellHTML: false, cellStyles: false, cellNF: false, sheetRows: 20001 };
 function loadXLSX() {
   return new Promise((res, rej) => {
-    if (window.XLSX) return res(window.XLSX);
-    const s = document.createElement('script'); s.src = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
+    if (window.XLSX && window.XLSX.version === '0.20.3') return res(window.XLSX);
+    const s = document.createElement('script'); s.src = XLSX_SRC; s.integrity = XLSX_SRI; s.crossOrigin = 'anonymous'; s.referrerPolicy = 'no-referrer';
     s.onload = () => res(window.XLSX); s.onerror = rej; document.head.appendChild(s);
   });
+}
+/* upload checks: extension, size, name, and the first bytes of the file must match its type */
+const BAD_EXT = /\.(exe|bat|cmd|com|sh|ps1|psm1|dll|msi|scr|vbs|vbe|jse?|wsf|jar|apk|app|hta|html?|xhtml|svg|php|py|pl|rb|lnk|iso|reg)$/i;
+const SIG = { zip: [0x50, 0x4b, 0x03, 0x04], ole: [0xd0, 0xcf, 0x11, 0xe0], pdf: [0x25, 0x50, 0x44, 0x46], png: [0x89, 0x50, 0x4e, 0x47], jpg: [0xff, 0xd8, 0xff], gif: [0x47, 0x49, 0x46, 0x38] };
+const EXT_SIG = { xlsx: 'zip', docx: 'zip', xls: 'ole', doc: 'ole', pdf: 'pdf', png: 'png', jpg: 'jpg', jpeg: 'jpg', gif: 'gif', webp: 'webp', heic: 'ftyp', heif: 'ftyp', csv: 'text', txt: 'text' };
+const EXT_MIME = { xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', xls: 'application/vnd.ms-excel', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', doc: 'application/msword', pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', heic: 'image/heic', heif: 'image/heif', csv: 'text/csv', txt: 'text/plain' };
+const extOf = n => (String(n).toLowerCase().match(/\.([a-z0-9]{1,5})$/) || [])[1] || '';
+async function checkFile(file, allowed, maxMB) {
+  const name = String(file.name || ''), ext = extOf(name);
+  if (!name || name.length > 200 || /[\u0000-\u001f<>:"|?*\\/]/.test(name)) return 'file.badName';
+  if (BAD_EXT.test(name) || !allowed.includes(ext)) return 'file.badType';
+  if (!file.size) return 'file.empty';
+  if (file.size > maxMB * 1048576) return 'file.tooBigX';
+  // a browser-reported type that clearly belongs to another kind of file
+  if (file.type && /^(application\/(x-msdownload|x-sh|x-bat|javascript|x-javascript)|text\/(html|javascript)|image\/svg)/i.test(file.type)) return 'file.badType';
+  const head = new Uint8Array(await file.slice(0, 512).arrayBuffer());
+  const starts = sig => sig.every((b, i) => head[i] === b);
+  const want = EXT_SIG[ext];
+  const ok = want === 'text' ? !head.includes(0) && !(head[0] === 0x4d && head[1] === 0x5a) && !/^\s*<(!doctype|html|script|svg)/i.test(new TextDecoder().decode(head))
+    : want === 'webp' ? starts([0x52, 0x49, 0x46, 0x46]) && String.fromCharCode(...head.slice(8, 12)) === 'WEBP'
+    : want === 'ftyp' ? String.fromCharCode(...head.slice(4, 8)) === 'ftyp'
+    : starts(SIG[want]);
+  return ok ? null : 'file.badContent';
 }
 async function handleOpsFile(file) {
   if (!file) return;
   try {
     let matrix;
     if (/\.(xlsx|xls)$/i.test(file.name)) {
-      const X = await loadXLSX(); const wb = X.read(await file.arrayBuffer());
+      const X = await loadXLSX(); const wb = X.read(await file.arrayBuffer(), XLSX_OPTS);
       matrix = X.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' });
     } else matrix = parseCSV(await file.text());
     const rows = matrixToOps(matrix);
@@ -1922,7 +1950,8 @@ Object.assign(ICONS, {
   'calendar-plus': '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18M12 14v4M10 16h4"/>'
 });
 let FILEBOX = {};
-const FILE_ACCEPT = 'image/*,.pdf,.doc,.docx,.xls,.xlsx,.csv';
+const FILE_EXT = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'heic', 'heif', 'pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv'];
+const FILE_ACCEPT = FILE_EXT.map(e => '.' + e).join(',');
 const fileMaxMB = () => (SRV.on ? 10 : 1.5);
 const fmtSize = n => (n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB');
 
@@ -1930,11 +1959,13 @@ function renderFP(id) {
   const el = $('#fl-' + id); if (!el) return;
   el.innerHTML = (FILEBOX[id] || []).map((f, i) => `<span class="fchip"><i>${ic('file')}</i><b>${esc(f.name)}</b><small>${fmtSize(f.size)}</small><button type="button" data-act="fpRemove" data-id="${id}" data-i="${i}" aria-label="${esc(t('act.delete'))}">${ic('x')}</button></span>`).join('');
 }
-function addFiles(id, list) {
+async function addFiles(id, list) {
   const box = (FILEBOX[id] = FILEBOX[id] || []);
   for (const f of list) {
     if (box.length >= 6) { toast(t('file.max'), 'warn'); break; }
     if (f.size > fileMaxMB() * 1048576) { toast(t('file.tooBig', { n: fileMaxMB() }), 'warn'); continue; }
+    const bad = await checkFile(f, FILE_EXT, fileMaxMB());
+    if (bad) { toast(`${String(f.name).slice(0, 60)}: ${t(bad, { n: fileMaxMB() })}`, 'warn'); continue; }
     box.push(f);
   }
   renderFP(id);
@@ -1948,7 +1979,7 @@ const uid12 = () => (window.crypto && crypto.randomUUID ? crypto.randomUUID() : 
 async function storeFiles(items, scope) {
   const out = [];
   for (const { file, kind } of items) {
-    const base = { id: 'F-' + uid12(), name: file.name, type: file.type || 'application/octet-stream', size: file.size, kind, at: today(), by: userName(user()) };
+    const base = { id: 'F-' + uid12(), name: file.name, type: EXT_MIME[extOf(file.name)] || file.type || 'application/octet-stream', size: file.size, kind, at: today(), by: userName(user()) };
     if (SRV.on && typeof sb !== 'undefined' && sb) {
       const u = user(), folder = isField(u) ? (u.empId || 'unlinked') : 'staff';
       const path = `${folder}/${scope}/${base.id}-${file.name.replace(/[^A-Za-z0-9._-]/g, '_')}`;
@@ -2104,7 +2135,7 @@ async function handleOpsFile(file) {
   try {
     let matrix;
     if (/\.(xlsx|xls)$/i.test(file.name)) {
-      const X = await loadXLSX(); const wb = X.read(await file.arrayBuffer());
+      const X = await loadXLSX(); const wb = X.read(await file.arrayBuffer(), XLSX_OPTS);
       matrix = X.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' });
     } else matrix = parseCSV(await file.text());
     const rows = matrixToOps(matrix);
@@ -2256,7 +2287,7 @@ function hsParse(m) {
   return rows.length ? { kind, rows } : null;
 }
 async function readMatrix(file) {
-  if (/\.(xlsx|xls)$/i.test(file.name)) { const X = await loadXLSX(); const wb = X.read(await file.arrayBuffer()); return X.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' }); }
+  if (/\.(xlsx|xls)$/i.test(file.name)) { const X = await loadXLSX(); const wb = X.read(await file.arrayBuffer(), XLSX_OPTS); return X.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' }); }
   return parseCSV(await file.text());
 }
 /* a date written in the file name, e.g. Riders_Performance_2026-11-15.csv, 15-11-2026, Nov 15 2026 */
@@ -2271,9 +2302,14 @@ function hsNameDate(name) {
 const HS_ORDER = ['perf', 'quality', 'wallet', 'distance', 'actions'];
 async function handleOpsFiles(picked) {
   const files = [...(picked || [])]; if (!files.length) return;
-  const got = [], other = [];
-  for (const f of files) { try { const p = hsParse(await readMatrix(f)); if (p) got.push({ name: f.name, fdate: hsNameDate(f.name), ...p }); else other.push(f); } catch (e) { other.push(f); } }
-  if (!got.length) { if (files.length === 1) return handleOpsFile(files[0]); toast(t('hsr.none'), 'warn'); return; }
+  const got = [], other = [], refused = [];
+  for (const f of files) {
+    const bad = await checkFile(f, ['csv', 'txt', 'xlsx', 'xls'], 10);
+    if (bad) { refused.push(`${String(f.name).slice(0, 60)}: ${t(bad, { n: 10 })}`); continue; }
+    try { const p = hsParse(await readMatrix(f)); if (p) got.push({ name: f.name, fdate: hsNameDate(f.name), ...p }); else other.push(f); } catch (e) { other.push(f); }
+  }
+  if (refused.length) toast(t('file.refused', { f: refused.join(' · ') }), 'bad');
+  if (!got.length) { if (other.length === 1 && files.length === 1) return handleOpsFile(other[0]); if (!refused.length) toast(t('hsr.none'), 'warn'); return; }
   got.sort((a, b) => HS_ORDER.indexOf(a.kind) - HS_ORDER.indexOf(b.kind) || String(a.fdate || '').localeCompare(String(b.fdate || '')) || a.name.localeCompare(b.name));
   const dated = got.flatMap(g => g.rows.map(r => r.d).filter(Boolean)).sort();
   const def = dated.length ? dated[dated.length - 1] : yday();
@@ -2392,7 +2428,7 @@ function pgOpsHS() {
   const rows = o && o.hs ? o.rows : [];
   const hidden = `<input type="file" id="opsfile" hidden multiple accept=".csv,.txt,.xlsx,.xls">`;
   const act = (ed ? btn('pickOps', t('hsr.upload'), { cls: 'pri', icon: 'upload' }) : '') + btn('editTarget', `${t('ops.target')}: ${nf(tg)}`, { icon: 'target' })
-    + (ent ? btn('editRates', t('fin.rates'), { icon: 'receipt' }) : '') + btn('hsClearDay', t('hsr.clearDay'), { icon: 'trash' }) + hidden;
+    + (user().role === 'ceo' ? btn('editRates', t('fin.rates'), { icon: 'receipt' }) : '') + btn('hsClearDay', t('hsr.clearDay'), { icon: 'trash' }) + hidden;
   const fresh = iso(new Date(Date.now() - 2 * 864e5));
   const last = ['perf', 'distance', 'quality', 'wallet', 'actions'].filter(k => h.last && h.last[k]).map(k => chip(`${t('hsr.k.' + k)}: ${fmtDate(h.last[k])}`, h.last[k] >= fresh ? 'ok' : 'warn')).join(' ');
   const pre = [['yday', t('hsr.pYday')], ['7', t('hsr.p7')], ['month', t('hsr.pMonth')], ['prev', t('hsr.pPrev')]], cur = hsPreset();
@@ -2709,7 +2745,7 @@ function finEntitlementTab() {
   const x = entTotals(), orders = o.rows.reduce((s, r) => s + r.orders, 0), km = o.rows.reduce((s, r) => s + (r.km || 0), 0);
   const kv = [[t('fin.rateOrder'), `${SAR(k.order)}`], [t('fin.rateKm'), `${SAR(k.km)}`], [t('hs.orders'), nf(orders)], [t('hs.km'), nf(r2(km))], [t('fin.entOrders'), SAR(money(x.orders))], [t('fin.entKm'), SAR(money(x.km))], [t('fin.entBonus'), SAR(money(x.bonus))], [t('fin.segRates'), SEGS.map(g => `${g} ${k['seg' + g]}`).join(' · ')], [t('fin.exclVat'), SAR(money(x.sub))], [`${t('fin.vat')} ${k.vat}%`, SAR(money(x.vat))], [t('fin.inclVat'), SAR(money(x.total))]];
   const rows = o.rows.map(r => { const e = entOf(r); return `<tr><td><b>${esc(r.name)}</b></td><td>${nf(r.orders)}</td><td>${r.km !== undefined ? nf(r2(r.km)) : '—'}</td><td>${r.segment ? chip(r.segment, segTone(r.segment)) : '—'}</td><td>${esc(money(e.orders))}</td><td>${esc(money(e.km))}</td><td>${esc(money(e.bonus))}</td><td><b>${esc(money(e.sub))}</b></td></tr>`; }).join('');
-  return `${range}<div class="mut sm" style="margin-bottom:10px">${esc(o.file)} · ${esc(fmtDate(o.at))}</div><div class="split" style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr);gap:18px"><div>${kv.map(([a, b]) => `<div class="kv"><span>${esc(a)}</span><b>${esc(b)}</b></div>`).join('')}<div class="acts" style="margin-top:14px">${btn('editRates', t('fin.rates'), { cls: 'sm', icon: 'edit' })}${btn('exportCSV', t('rep.export'), { cls: 'sm', icon: 'download', data: { k: 'entitlement' } })}${btn('pdfReport', t('rep.pdf'), { cls: 'sm pri', icon: 'file-pdf', data: { k: 'entitlement' } })}</div></div><div class="tw"><table><thead><tr><th>${esc(t('ops.courier'))}</th><th>${esc(t('hs.orders'))}</th><th>${esc(t('hs.km'))}</th><th>${esc(t('hsr.seg'))}</th><th>${esc(t('fin.entOrders'))}</th><th>${esc(t('fin.entKm'))}</th><th>${esc(t('fin.entBonus'))}</th><th>${esc(t('fin.entSub'))}</th></tr></thead><tbody>${rows}</tbody><tfoot><tr><td><b>${esc(t('print.total'))}</b></td><td><b>${nf(orders)}</b></td><td><b>${nf(r2(km))}</b></td><td></td><td><b>${esc(money(x.orders))}</b></td><td><b>${esc(money(x.km))}</b></td><td><b>${esc(money(x.bonus))}</b></td><td><b>${esc(money(x.sub))}</b></td></tr></tfoot></table></div></div>`;
+  return `${range}<div class="mut sm" style="margin-bottom:10px">${esc(o.file)} · ${esc(fmtDate(o.at))}</div><div class="split" style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr);gap:18px"><div>${kv.map(([a, b]) => `<div class="kv"><span>${esc(a)}</span><b>${esc(b)}</b></div>`).join('')}<div class="acts" style="margin-top:14px">${user().role === 'ceo' ? btn('editRates', t('fin.rates'), { cls: 'sm', icon: 'edit' }) : ''}${btn('exportCSV', t('rep.export'), { cls: 'sm', icon: 'download', data: { k: 'entitlement' } })}${btn('pdfReport', t('rep.pdf'), { cls: 'sm pri', icon: 'file-pdf', data: { k: 'entitlement' } })}</div></div><div class="tw"><table><thead><tr><th>${esc(t('ops.courier'))}</th><th>${esc(t('hs.orders'))}</th><th>${esc(t('hs.km'))}</th><th>${esc(t('hsr.seg'))}</th><th>${esc(t('fin.entOrders'))}</th><th>${esc(t('fin.entKm'))}</th><th>${esc(t('fin.entBonus'))}</th><th>${esc(t('fin.entSub'))}</th></tr></thead><tbody>${rows}</tbody><tfoot><tr><td><b>${esc(t('print.total'))}</b></td><td><b>${nf(orders)}</b></td><td><b>${nf(r2(km))}</b></td><td></td><td><b>${esc(money(x.orders))}</b></td><td><b>${esc(money(x.km))}</b></td><td><b>${esc(money(x.bonus))}</b></td><td><b>${esc(money(x.sub))}</b></td></tr></tfoot></table></div></div>`;
 }
 function pgFinance() {
   const ent = seesEntitlement();
@@ -2907,7 +2943,8 @@ ICONS.logout = '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M2
 const SB_CDN = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js';
 let sb = null;
 const sbConfig = () => (typeof OR_CONFIG !== 'undefined' && OR_CONFIG && OR_CONFIG.url && OR_CONFIG.anonKey && !/YOUR/i.test(OR_CONFIG.url + OR_CONFIG.anonKey)) ? OR_CONFIG : null;
-const loadScript = src => new Promise((res, rej) => { const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = rej; document.head.appendChild(s); });
+const SB_SRI = 'sha384-0w2KAL2YHP6wKOkUDzkCDGgVvfmHnj02DHeQ6XcHOgTfFsGyonKOpShMH1x6nk9o';
+const loadScript = (src, sri) => new Promise((res, rej) => { const s = document.createElement('script'); s.src = src; if (sri) { s.integrity = sri; s.crossOrigin = 'anonymous'; } s.onload = res; s.onerror = rej; document.head.appendChild(s); });
 async function fn(name, body) {
   let tok = OR_CONFIG.anonKey;
   if (sb) { const { data } = await sb.auth.getSession(); if (data.session) tok = data.session.access_token; }
@@ -2937,6 +2974,7 @@ async function fetchAll() {
   db.limits = set.limits || {};
   const gr = await sb.from('perm_grants').select('*').order('id', { ascending: true }); db.grants = gr.error ? [] : gr.data;
   if (set.ops === undefined && isField(profs.find(p => p.id === CUR) ? userObj(profs.find(p => p.id === CUR)) : null)) { const mo = await sb.rpc('my_ops'); if (!mo.error && mo.data) set.ops = mo.data; }
+  if (set.perms === undefined) { const mp = await sb.rpc('my_perms'); if (!mp.error && mp.data) set.perms = mp.data; }
   db.perms = fillPerms(set.perms); db.ops = set.ops ?? null; db.target = set.target ?? 300; db.rates = Object.assign({ order: 8, km: 1.15, vat: 15 }, set.rates || {});
   const num = rows => rows.reduce((m, r) => Math.max(m, parseInt(String(r.id).replace(/\D/g, ''), 10) || 0), 0);
   db.seq = { emp: num(emps), veh: num(vehs), lic: num(lics), req: num(reqs), mnt: num(mnts), usr: 0 };
@@ -3036,7 +3074,7 @@ async function enter() {
 async function bootServer() {
   if (!sbConfig()) return false;
   SRV.on = true; document.body.classList.add('srv');
-  try { await loadScript(SB_CDN); } catch (e) { showLogin(t('auth.offline')); return true; }
+  try { await loadScript(SB_CDN, SB_SRI); } catch (e) { showLogin(t('auth.offline')); return true; }
   /* each tab keeps its own session, so it also keeps its own lock: a frozen background tab can no longer block sign-in in the others */
   const tabLock = (() => { let q = Promise.resolve(); return (name, timeout, run) => { const r = q.then(() => run()); q = r.catch(() => {}); return r; }; })();
   sb = window.supabase.createClient(OR_CONFIG.url, OR_CONFIG.anonKey, { auth: { storage: window.sessionStorage, persistSession: true, autoRefreshToken: true, detectSessionInUrl: false, lock: tabLock } });
@@ -3093,7 +3131,7 @@ function pwModal(locked) {
       if (v.nw.length < 8 || !/[A-Za-z]/.test(v.nw) || !/[0-9]/.test(v.nw)) return t('auth.weak');
       (async () => {
         const r = await fn('change-password', { oldPassword: v.old, newPassword: v.nw });
-        if (!r.ok) { toast(t(r.data.error === 'wrongOld' ? 'auth.wrongOld' : r.data.error === 'same' ? 'auth.same' : 'auth.weak'), 'warn'); return; }
+        if (!r.ok) { toast(r.status === 429 ? t('auth.locked', { s: 15 }) : t(r.data.error === 'wrongOld' ? 'auth.wrongOld' : r.data.error === 'same' ? 'auth.same' : 'auth.weak'), 'warn'); return; }
         closeModal(); toast(t('auth.pwDone'));
         if (SRV.me && SRV.me.must) { SRV.me.must = false; try { adopt(await fetchAll()); UI.page = firstPage(); render(true); } catch (e) { toast(t('sync.fail'), 'bad'); } }
       })();
@@ -3643,6 +3681,12 @@ auth.new2|Repeat new password|أعد كتابة كلمة السر الجديدة
 auth.must|Choose your own password before continuing.|اختر كلمة سر خاصة بك قبل المتابعة.
 auth.pwHint|At least 8 characters with letters and numbers.|8 أحرف على الأقل وتحتوي على أحرف وأرقام.
 auth.wrongOld|Current password is incorrect|كلمة السر الحالية غير صحيحة
+file.badName|File name is not allowed|اسم الملف غير مسموح
+file.badType|This file type is not allowed|نوع الملف غير مسموح
+file.badContent|The file content does not match its type|محتوى الملف لا يطابق نوعه
+file.empty|The file is empty|الملف فارغ
+file.tooBigX|Larger than {n} MB|أكبر من {n} ميجابايت
+file.refused|Not uploaded: {f}|لم يتم رفع: {f}
 auth.weak|Password must be 8+ characters with letters and numbers|يجب أن تكون 8 أحرف على الأقل مع أحرف وأرقام
 auth.mismatch|The two passwords do not match|كلمتا السر غير متطابقتين
 auth.same|New password must be different|يجب أن تختلف كلمة السر الجديدة
@@ -4144,7 +4188,7 @@ function movePill() {
   const p = b.parentElement.querySelector('.pill'); p.style.height = b.offsetHeight + 'px'; p.style.transform = `translateY(${b.offsetTop}px)`; p.style.opacity = 1;
 }
 /* actions that need more than edit access (permissions document) */
-const GATE = { hsClearDay: () => canFull('ops'), hsLink: () => canEdit('people'), resetEmpPw: () => canFull('people'), addEmp: () => canFull('people'), delEmp: () => canFull('people'), adjBalance: () => canFull('people'), delVeh: () => canFull('fleet'), delLic: () => canFull('licenses'), maintAccept: () => canApprove('fleet'), maintDecline: () => canApprove('fleet') };
+const GATE = { editRates: () => user().role === 'ceo', hsClearDay: () => canFull('ops'), hsLink: () => canEdit('people'), resetEmpPw: () => canFull('people'), addEmp: () => canFull('people'), delEmp: () => canFull('people'), adjBalance: () => canFull('people'), delVeh: () => canFull('fleet'), delLic: () => canFull('licenses'), maintAccept: () => canApprove('fleet'), maintDecline: () => canApprove('fleet') };
 function gateActs(root) { for (const a in GATE) if (!GATE[a]()) $$(`[data-act="${a}"]`, root).forEach(b => b.remove()); }
 for (const a in GATE) { const f = A_[a]; if (f) A_[a] = d => (GATE[a]() ? f(d) : toast(t('err.noaccess'), 'warn')); }
 function render(animate) {
