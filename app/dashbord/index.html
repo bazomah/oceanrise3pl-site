@@ -518,6 +518,11 @@ html[dir="rtl"] .ic.flip svg{transform:scaleX(-1)}
   .modal{padding:22px;border-radius:26px}
   .toasts{inset-inline:14px}
 }
+/* icon buttons: drop the browser's default button padding (iPhone Safari's is wide enough to squeeze the icon
+   and push it sideways in Arabic) so every icon sits exactly in the middle of its box */
+.iconbtn{padding:0;justify-content:center;align-content:center;text-align:center}
+.iconbtn > .ic{margin:auto}
+.iconbtn .dot{top:-6px;inset-inline-end:-6px}
 /* all screens: the side menu scrolls inside itself when it is taller than the window (laptops with short screens,
    browser zoom), so the System items at the bottom are always reachable; thin scrollbar only while needed */
 .rail{overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:var(--gb) transparent}
