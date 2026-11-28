@@ -2115,15 +2115,20 @@ async function handleOpsFile(file) {
 A_.opsTemplate = () => downloadCSV('oceanrise-hungerstation-template.csv', [[t('hs.name'), t('hs.empNo'), t('hs.orders'), t('hs.km'), t('hs.shifts'), t('hs.hours'), t('hs.rating'), t('hs.notes')]]);
 
 /* ---------- money ---------- */
-const rates = () => Object.assign({ order: 8, km: 1.15, vat: 15 }, DB.rates || {});
+const SEGS = ['A', 'B', 'C', 'D', 'F'];
+const RATE_DEF = { order: 8, km: 1.15, vat: 15, segA: 2.75, segB: 2.25, segC: 1.75, segD: 1.25, segF: 0 };
+const rates = () => Object.assign({}, RATE_DEF, DB.rates || {});
+/* quality bonus for the company, per completed order, by the courier's HungerStation segment */
+const segRate = s => (SEGS.includes(s) ? Number(rates()['seg' + s]) || 0 : 0);
 const r2 = n => Math.round(n * 100) / 100;
 function entOf(r) {
-  const k = rates(), o = r2((r.orders || 0) * k.order), d = r2((r.km || 0) * k.km), sub = r2(o + d), vat = r2(sub * k.vat / 100);
-  return { orders: o, km: d, sub, vat, total: r2(sub + vat) };
+  const k = rates(), o = r2((r.orders || 0) * k.order), d = r2((r.km || 0) * k.km), b = r2((r.orders || 0) * segRate(r.segment)), sub = r2(o + d + b), vat = r2(sub * k.vat / 100);
+  return { orders: o, km: d, bonus: b, sub, vat, total: r2(sub + vat) };
 }
-const entTotals = () => (OPS()?.rows || []).reduce((a, r) => { const e = entOf(r); ['orders', 'km', 'sub', 'vat', 'total'].forEach(k => a[k] = r2(a[k] + e[k])); return a; }, { orders: 0, km: 0, sub: 0, vat: 0, total: 0 });
+const entTotals = () => (OPS()?.rows || []).reduce((a, r) => { const e = entOf(r); ['orders', 'km', 'bonus', 'sub', 'vat', 'total'].forEach(k => a[k] = r2(a[k] + e[k])); return a; }, { orders: 0, km: 0, bonus: 0, sub: 0, vat: 0, total: 0 });
 /* the entitlement from HungerStation is for the CEO only */
-const seesEntitlement = () => user().role === 'ceo';
+const MONEY_ROLES = ['ceo', 'finance_manager', 'accountant', 'cashier'];
+const seesEntitlement = () => MONEY_ROLES.includes(user().role);
 const money = n => nf(r2(n)).replace(/(\.\d)$/, '$10');
 const fmtRating = v => (v === undefined ? '—' : v > 5 ? `${Math.round(v * 10) / 10}%` : (Math.round(v * 100) / 100).toFixed(2));
 const ratingTone = v => (v === undefined ? 'info' : v > 5 ? (v >= 90 ? 'ok' : v >= 75 ? 'warn' : 'bad') : (v >= 4.5 ? 'ok' : v >= 4 ? 'warn' : 'bad'));
@@ -2133,8 +2138,10 @@ const hsProdLabel = r => (r.prod !== undefined || r.hours ? t('hs.perHour') : t(
 
 A_.editRates = () => openModal({
   title: t('fin.rates'), desc: t('fin.ratesDesc'), size: 'sm', submit: t('act.save'),
-  fields: [{ id: 'order', label: `${t('fin.rateOrder')} (${t('sar')})`, type: 'number', min: 0, step: '0.01', req: true, value: rates().order, wide: true }, { id: 'km', label: `${t('fin.rateKm')} (${t('sar')})`, type: 'number', min: 0, step: '0.01', req: true, value: rates().km, wide: true }, { id: 'vat', label: `${t('fin.vat')} %`, type: 'number', min: 0, step: '0.01', req: true, value: rates().vat, wide: true }],
-  onSubmit: v => { DB.rates = { order: Number(v.order), km: Number(v.km), vat: Number(v.vat) }; save(); closeModal(); toast(t('toast.saved')); render(); }
+  fields: [{ id: 'order', label: `${t('fin.rateOrder')} (${t('sar')})`, type: 'number', min: 0, step: '0.01', req: true, value: rates().order, wide: true }, { id: 'km', label: `${t('fin.rateKm')} (${t('sar')})`, type: 'number', min: 0, step: '0.01', req: true, value: rates().km, wide: true }, { id: 'vat', label: `${t('fin.vat')} %`, type: 'number', min: 0, step: '0.01', req: true, value: rates().vat, wide: true },
+    { section: t('fin.segSec'), desc: t('fin.segSecD'), icon: 'star', tone: 't-sa' },
+    ...SEGS.map(g => ({ id: 'seg' + g, label: `${t('fin.rateSeg', { s: g })} (${t('sar')})`, type: 'number', min: 0, step: '0.01', req: true, value: rates()['seg' + g] }))],
+  onSubmit: v => { DB.rates = { order: Number(v.order), km: Number(v.km), vat: Number(v.vat), ...Object.fromEntries(SEGS.map(g => ['seg' + g, Number(v['seg' + g])])) }; save(); closeModal(); toast(t('toast.saved')); render(); }
 });
 
 A_.courierDetail = d => {
@@ -2182,7 +2189,7 @@ function pgOps() {
 function hsCard(e) {
   const r = hsRowOf(e); if (!r) return '';
   if (r.rider) {
-    const kv = [[t('hsr.completed'), n2(r.completed)], [t('hsr.notified'), n2(r.notified)], [t('hsr.declined'), n2(r.declined)], [t('hs.accept'), r.accept !== undefined ? r.accept + '%' : '—'], [t('hsr.workH'), n2(r.actual_h)], [t('hsr.lostH'), n2(r.lost_h)], [t('hsr.breakH'), n2(r.break_h)], [t('hsr.kmPay'), n2(r.km_pay)], [t('hsr.wallet'), r.wallet !== undefined ? money(r.wallet) : '—'], [t('hsr.seg'), r.segment || '—'], [t('ops.achieve'), Math.round(r.orders / DB.target * 100) + '%']];
+    const kv = [[t('hsr.completed'), n2(r.completed)], [t('hsr.notified'), n2(r.notified)], [t('hsr.declined'), n2(r.declined)], [t('hs.accept'), r.accept !== undefined ? r.accept + '%' : '—'], [t('hsr.workH'), n2(r.actual_h)], [t('hsr.lostH'), n2(r.lost_h)], [t('hsr.breakH'), n2(r.break_h)], [t('hsr.kmTotal'), n2(r.km_total)], [t('hsr.wallet'), r.wallet !== undefined ? money(r.wallet) : '—'], [t('hsr.seg'), r.segment || '—'], [t('ops.achieve'), Math.round(r.orders / DB.target * 100) + '%']];
     return card(chead(t('hs.mine'), `${t('hs.brand')} · ${OPS().file}`, btn('hsRider', t('hsr.dailyBtn'), { cls: 'sm', icon: 'calendar', data: { r: r.rider } })) + `<div class="list">${kv.map(([k, v]) => `<div class="kv"><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join('')}${r.notes ? `<div class="kv"><span>${esc(t('hs.notes'))}</span><b style="white-space:pre-line">${esc(r.notes)}</b></div>` : ''}</div>`);
   }
   const p = hsProd(r), kv = [[t('hs.orders'), nf(r.orders)]];
@@ -2194,8 +2201,8 @@ function hsCard(e) {
 }
 
 /* exports */
-EXPORTS.ops = () => OPS()?.hs ? [[t('ops.courier'), t('hsr.riderNo'), t('hs.empNo'), t('hsr.notified'), t('hsr.completed'), t('hsr.declined'), t('hs.accept'), t('hsr.plannedH'), t('hsr.workH'), t('hsr.lostH'), t('hsr.breakH'), t('hsr.kmTotal'), t('hsr.kmPay'), t('hsr.wallet'), t('hsr.seg'), t('ops.achieve'), t('hs.notes'), ...(seesEntitlement() ? [t('fin.entOrders'), t('fin.entKm'), t('fin.entSub')] : [])], ...OPS().rows.map(r => { const e = entOf(r); return [r.name, r.rider, r.empNo, r.notified, r.completed, r.declined, r.accept, r2(r.planned_h || 0), r2(r.actual_h || 0), r2(r.lost_h || 0), r2(r.break_h || 0), r2(r.km_total || 0), r2(r.km_pay || 0), r.wallet, r.segment, Math.round(r.orders / DB.target * 100) + '%', r.notes, ...(seesEntitlement() ? [e.orders, e.km, e.sub] : [])]; })] : [[t('ops.courier'), t('hs.empNo'), t('ops.orders'), t('hs.km'), t('hs.shifts'), t('hs.hours'), t('hs.rating'), t('ops.achieve'), t('hs.notes'), ...(seesEntitlement() ? [t('fin.entOrders'), t('fin.entKm'), t('fin.entSub')] : [])], ...(OPS()?.rows || []).map(r => { const e = entOf(r); return [r.name, r.empNo, r.orders, r.km, r.shifts, r.hours, r.rating, Math.round(r.orders / DB.target * 100) + '%', r.notes, ...(seesEntitlement() ? [e.orders, e.km, e.sub] : [])]; })];
-EXPORTS.entitlement = () => seesEntitlement() ? [[t('ops.courier'), t('ops.orders'), t('hs.km'), t('fin.entOrders'), t('fin.entKm'), t('fin.entSub'), t('fin.vat'), t('fin.entTotal')], ...(OPS()?.rows || []).map(r => { const e = entOf(r); return [r.name, r.orders, r2(r.km || 0), e.orders, e.km, e.sub, e.vat, e.total]; })] : [[]];
+EXPORTS.ops = () => OPS()?.hs ? [[t('ops.courier'), t('hsr.riderNo'), t('hs.empNo'), t('hsr.notified'), t('hsr.completed'), t('hsr.declined'), t('hs.accept'), t('hsr.plannedH'), t('hsr.workH'), t('hsr.lostH'), t('hsr.breakH'), t('hsr.kmTotal'), ...(seesEntitlement() ? [t('hsr.kmPay')] : []), t('hsr.wallet'), t('hsr.seg'), t('ops.achieve'), t('hs.notes'), ...(seesEntitlement() ? [t('fin.entOrders'), t('fin.entKm'), t('fin.entBonus'), t('fin.entSub')] : [])], ...OPS().rows.map(r => { const e = entOf(r); return [r.name, r.rider, r.empNo, r.notified, r.completed, r.declined, r.accept, r2(r.planned_h || 0), r2(r.actual_h || 0), r2(r.lost_h || 0), r2(r.break_h || 0), r2(r.km_total || 0), ...(seesEntitlement() ? [r2(r.km_pay || 0)] : []), r.wallet, r.segment, Math.round(r.orders / DB.target * 100) + '%', r.notes, ...(seesEntitlement() ? [e.orders, e.km, e.bonus, e.sub] : [])]; })] : [[t('ops.courier'), t('hs.empNo'), t('ops.orders'), t('hs.km'), t('hs.shifts'), t('hs.hours'), t('hs.rating'), t('ops.achieve'), t('hs.notes'), ...(seesEntitlement() ? [t('fin.entOrders'), t('fin.entKm'), t('fin.entSub')] : [])], ...(OPS()?.rows || []).map(r => { const e = entOf(r); return [r.name, r.empNo, r.orders, r.km, r.shifts, r.hours, r.rating, Math.round(r.orders / DB.target * 100) + '%', r.notes, ...(seesEntitlement() ? [e.orders, e.km, e.sub] : [])]; })];
+EXPORTS.entitlement = () => seesEntitlement() ? [[t('ops.courier'), t('ops.orders'), t('hs.km'), t('hsr.seg'), t('fin.entOrders'), t('fin.entKm'), t('fin.entBonus'), t('fin.entSub'), t('fin.vat'), t('fin.entTotal')], ...(OPS()?.rows || []).map(r => { const e = entOf(r); return [r.name, r.orders, r2(r.km || 0), r.segment || '', e.orders, e.km, e.bonus, e.sub, e.vat, e.total]; })] : [[]];
 
 function hsKV(e) {
   const r = hsRowOf(e); if (!r) return '';
@@ -2383,22 +2390,22 @@ function pgOpsHS() {
     ['t-co', 'x', t('hsr.declined'), nf(S('declined')), t('hsr.acceptRate', { n: notified ? Math.round(accepted / notified * 100) : 0 })],
     ['t-gr', 'clock', t('hsr.workH'), n2(S('actual_h')), t('hsr.ofPlanned', { n: n2(S('planned_h')) })],
     ['t-sa', 'alert', t('hsr.lostH'), n2(S('lost_h')), t('hsr.breakFoot', { n: n2(S('break_h')) })],
-    ['t-vi', 'map-pin', t('hsr.kmPay'), n2(S('km_pay')), t('hsr.ofKm', { n: n2(S('km_total')) })],
+    ent ? ['t-vi', 'map-pin', t('hsr.kmPay'), n2(S('km_pay')), t('hsr.ofKm', { n: n2(S('km_total')) })] : ['t-vi', 'map-pin', t('hsr.kmTotal'), n2(S('km_total')), t('hsr.kmFoot')],
     ['t-bl', 'wallet', t('hsr.wallet'), money(S('wallet')), t('hsr.walletFoot')],
     ['t-gr', 'target', t('ops.avg'), ach + '%', t('ops.vsTarget', { n: nf(tg) })]
   ];
-  if (ent) { const x = entTotals(); tiles.push(['t-sa', 'receipt', t('fin.entTitle'), money(x.sub), `${t('fin.inclVat')}: ${money(x.total)}`]); }
+  if (ent) { const x = entTotals(); tiles.push(['t-sa', 'receipt', t('fin.entTitle'), money(x.sub), `${t('fin.inclVat')}: ${money(x.total)}`], ['t-co', 'star', t('fin.entBonus'), money(x.bonus), t('fin.bonusFoot')]); }
   const kpis = `<div class="grid g4 stag mt">${tiles.map(([tone, i, k, v, foot]) => `<div class="card glass spot kpi ${tone}"><div class="top"><span>${esc(k)}</span><span class="orb">${ic(i)}</span></div><div class="num">${esc(v)}</div><div class="foot">${esc(foot)}</div></div>`).join('')}</div>`;
   const segs = ['A', 'B', 'C', 'D', 'F'].map(s => [s, rows.filter(x => x.segment === s).length]);
   const segHTML = segs.some(s => s[1]) ? `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">${segs.map(([s, n]) => chip(`${t('hsr.seg')} ${s}: ${n}`, segTone(s))).join('')}</div>` : '';
   const th = k => `<th>${esc(k)}</th>`;
-  const dayRows = (h.days || []).map(d => `<tr><td><b>${esc(fmtDate(d.d))}</b></td><td>${nf(d.riders || 0)}</td><td>${n2(d.notified)}</td><td><b>${n2(d.completed)}</b></td><td>${n2(d.declined)}</td><td>${n2(d.actual_h)}</td><td>${n2(d.lost_h)}</td><td>${n2(d.break_h)}</td><td>${n2(d.km_pay)}</td><td>${d.n_actions ? chip(nf(d.n_actions), 'warn') : '—'}</td></tr>`).join('');
-  const daily = card(chead(t('hsr.daily'), t('hsr.dailySub')) + segHTML + `<div class="tw"><table><thead><tr>${[t('req.date'), t('ops.couriers'), t('hsr.notified'), t('hsr.completed'), t('hsr.declined'), t('hsr.workH'), t('hsr.lostH'), t('hsr.breakH'), t('hsr.kmPay'), t('hs.notes')].map(th).join('')}</tr></thead><tbody>${dayRows}</tbody></table></div>`);
+  const dayRows = (h.days || []).map(d => `<tr><td><b>${esc(fmtDate(d.d))}</b></td><td>${nf(d.riders || 0)}</td><td>${n2(d.notified)}</td><td><b>${n2(d.completed)}</b></td><td>${n2(d.declined)}</td><td>${n2(d.actual_h)}</td><td>${n2(d.lost_h)}</td><td>${n2(d.break_h)}</td><td>${n2(ent ? d.km_pay : d.km_total)}</td><td>${d.n_actions ? chip(nf(d.n_actions), 'warn') : '—'}</td></tr>`).join('');
+  const daily = card(chead(t('hsr.daily'), t('hsr.dailySub')) + segHTML + `<div class="tw"><table><thead><tr>${[t('req.date'), t('ops.couriers'), t('hsr.notified'), t('hsr.completed'), t('hsr.declined'), t('hsr.workH'), t('hsr.lostH'), t('hsr.breakH'), ent ? t('hsr.kmPay') : t('hsr.kmTotal'), t('hs.notes')].map(th).join('')}</tr></thead><tbody>${dayRows}</tbody></table></div>`);
   const top3 = rows.slice(0, 3), order = [top3[1], top3[0], top3[2]].filter(Boolean), pods = { 0: ['t-sa', 190, 1], 1: ['t-cy', 150, 2], 2: ['t-vi', 120, 3] };
   const podium = `<div class="podium">${order.map(x => { const [tone, ht, n] = pods[rows.indexOf(x)]; return `<div class="pod">${avatar(x.name)}<b title="${esc(x.name)}">${esc(x.name)}</b><small>${nf(x.orders)}</small><div class="col ${tone}" style="--h:${ht}px">${n}</div></div>`; }).join('')}</div>`;
   const list = rows.map((x, i) => [x, i]).filter(([x]) => matchQ('ops', x.name, x.rider, x.empNo, x.notes, x.segment));
-  const cols = [t('ops.courier'), t('hsr.notified'), t('hsr.completed'), t('hsr.declined'), t('hsr.workH'), t('hsr.lostH'), t('hsr.breakH'), t('hsr.kmPay'), t('hsr.wallet'), t('hsr.seg'), t('hs.notes'), ...(ent ? [t('fin.entSub')] : [])];
-  const body = list.map(([x, i]) => { const p = x.orders / tg; return `<tr class="clk" data-act="hsRider" data-r="${esc(x.rider)}" style="cursor:pointer"><td class="mut">${i + 1}</td><td><div class="person">${avatar(x.name)}<div><b>${esc(x.name)}</b><small class="mut" style="display:block">#${esc(x.rider)}${x.empId ? '' : ' · ' + esc(t('hsr.unlinked'))}</small></div></div></td><td>${n2(x.notified)}</td><td><b>${n2(x.completed)}</b></td><td>${n2(x.declined)}</td><td>${n2(x.actual_h)}</td><td>${n2(x.lost_h)}</td><td>${n2(x.break_h)}</td><td>${n2(x.km_pay)}</td><td>${x.wallet !== undefined ? esc(money(x.wallet)) : '—'}</td><td>${x.segment ? chip(x.segment, segTone(x.segment)) : '—'}</td><td>${x.n_actions ? chip(nf(x.n_actions), 'warn') : '—'}</td>${ent ? `<td>${esc(money(entOf(x).sub))}</td>` : ''}<td><div class="dbar" style="grid-template-columns:1fr 52px"><div class="bar"><i style="--w:${clamp(p * 100, 3, 100)};--bc:${p >= 1 ? 'var(--ok)' : p >= .7 ? 'var(--warn)' : 'var(--bad)'}"></i></div><b style="color:var(--ink)">${Math.round(p * 100)}%</b></div></td></tr>`; }).join('');
+  const cols = [t('ops.courier'), t('hsr.notified'), t('hsr.completed'), t('hsr.declined'), t('hsr.workH'), t('hsr.lostH'), t('hsr.breakH'), ent ? t('hsr.kmPay') : t('hsr.kmTotal'), t('hsr.wallet'), t('hsr.seg'), t('hs.notes'), ...(ent ? [t('fin.entBonus'), t('fin.entSub')] : [])];
+  const body = list.map(([x, i]) => { const p = x.orders / tg; return `<tr class="clk" data-act="hsRider" data-r="${esc(x.rider)}" style="cursor:pointer"><td class="mut">${i + 1}</td><td><div class="person">${avatar(x.name)}<div><b>${esc(x.name)}</b><small class="mut" style="display:block">#${esc(x.rider)}${x.empId ? '' : ' · ' + esc(t('hsr.unlinked'))}</small></div></div></td><td>${n2(x.notified)}</td><td><b>${n2(x.completed)}</b></td><td>${n2(x.declined)}</td><td>${n2(x.actual_h)}</td><td>${n2(x.lost_h)}</td><td>${n2(x.break_h)}</td><td>${n2(ent ? x.km_pay : x.km_total)}</td><td>${x.wallet !== undefined ? esc(money(x.wallet)) : '—'}</td><td>${x.segment ? chip(x.segment, segTone(x.segment)) : '—'}</td><td>${x.n_actions ? chip(nf(x.n_actions), 'warn') : '—'}</td>${ent ? `<td>${esc(money(entOf(x).bonus))}</td><td>${esc(money(entOf(x).sub))}</td>` : ''}<td><div class="dbar" style="grid-template-columns:1fr 52px"><div class="bar"><i style="--w:${clamp(p * 100, 3, 100)};--bc:${p >= 1 ? 'var(--ok)' : p >= .7 ? 'var(--warn)' : 'var(--bad)'}"></i></div><b style="color:var(--ink)">${Math.round(p * 100)}%</b></div></td></tr>`; }).join('');
   return `${head}${kpis}
     <div class="mt">${daily}</div>
     <div class="mt">${card(chead(t('ops.podium'), t('ops.podiumSub')) + podium)}</div>
@@ -2410,8 +2417,8 @@ A_.hsRider = async d => {
   const rid = String(d.r || ''), o = OPS(), x = (o && o.hs ? o.rows : []).find(z => z.rider === rid); if (!x) return;
   const r = hsRange(); let raw = [];
   if (SRV.on) {
-    const q = await sb.from('hs_reports').select('kind,rep_date,k,data').eq('rider_id', rid).gte('rep_date', r.from).lte('rep_date', r.to).order('rep_date', { ascending: false }).range(0, 1999);
-    raw = q.error ? [] : q.data.map(z => ({ kind: z.kind, d: z.rep_date, k: z.k, data: z.data }));
+    const q = await sb.rpc('hs_rider', { p_rider: rid, d1: r.from, d2: r.to });
+    raw = q.error ? [] : (q.data || []).map(z => ({ kind: z.kind, d: z.d, k: z.k, data: z.data }));
   } else raw = hsLocal().filter(z => z.r === rid && z.d >= r.from && z.d <= r.to);
   const byDay = new Map();
   raw.forEach(z => {
@@ -2423,12 +2430,12 @@ A_.hsRider = async d => {
   const g = (day, k) => n2(day[k]);
   const kv = [[t('hsr.notified'), n2(x.notified)], [t('hsr.completed'), n2(x.completed)], [t('hsr.accepted'), n2(x.accepted)], [t('hsr.declined'), n2(x.declined)], [t('hsr.cancelled'), n2(x.cancelled)], [t('hsr.notAccepted'), n2(x.not_accepted)],
     [t('hs.accept'), x.accept !== undefined ? x.accept + '%' : '—'], [t('hs.shifts'), n2(x.shifts)], [t('hsr.days'), n2(x.days)], [t('hsr.plannedH'), n2(x.planned_h)], [t('hsr.workH'), n2(x.actual_h)], [t('hsr.lostH'), n2(x.lost_h)], [t('hsr.breakH'), n2(x.break_h)], [t('hsr.noShows'), n2(x.no_shows)],
-    [t('hsr.kmTotal'), n2(x.km_total)], [t('hsr.kmPay'), n2(x.km_pay)], [t('hsr.wallet'), x.wallet !== undefined ? `${money(x.wallet)}${x.wallet_at ? ' · ' + fmtDate(x.wallet_at) : ''}` : '—'],
+    [t('hsr.kmTotal'), n2(x.km_total)], ...(seesEntitlement() ? [[t('hsr.kmPay'), n2(x.km_pay)]] : []), [t('hsr.wallet'), x.wallet !== undefined ? `${money(x.wallet)}${x.wallet_at ? ' · ' + fmtDate(x.wallet_at) : ''}` : '—'],
     [t('hsr.seg'), x.segment ? `${x.segment}${x.dq !== undefined ? ' · ' + r2(x.dq * 100) + '%' : ''}` : '—'], [t('hsr.qMonth'), x.q_gross !== undefined ? `${nf(x.q_completed ?? 0)} / ${nf(x.q_gross)} · ${t('hsr.failed')} ${nf(x.q_failed ?? 0)}` : '—'],
     [t('hsr.contract'), [x.contract, x.vehicle, x.city].filter(Boolean).join(' · ') || '—']];
-  if (seesEntitlement()) { const e = entOf(x); kv.push([t('fin.entSub'), SAR(money(e.sub))], [t('fin.entTotal'), SAR(money(e.total))]); }
+  if (seesEntitlement()) { const e = entOf(x); kv.push([t('fin.entBonus'), `${SAR(money(e.bonus))} · ${x.segment || '—'} × ${segRate(x.segment)}`], [t('fin.entSub'), SAR(money(e.sub))], [t('fin.entTotal'), SAR(money(e.total))]); }
   const days = [...byDay.keys()].sort().reverse();
-  const table = days.length ? `<div class="tw"><table><thead><tr>${[t('req.date'), t('hsr.notified'), t('hsr.completed'), t('hsr.declined'), t('hsr.workH'), t('hsr.lostH'), t('hsr.breakH'), t('hsr.kmPay'), t('hsr.wallet'), t('hs.notes')].map(k => `<th>${esc(k)}</th>`).join('')}</tr></thead><tbody>${days.map(dd => { const day = byDay.get(dd); return `<tr><td><b>${esc(fmtDate(dd))}</b></td><td>${g(day, 'perf.notified_deliveries')}</td><td><b>${g(day, 'perf.completed_deliveries')}</b></td><td>${g(day, 'perf.declined_deliveries')}</td><td>${g(day, 'perf.actual_working_hours')}</td><td>${g(day, 'perf.lost_hours')}</td><td>${g(day, 'perf.break_hours')}</td><td>${g(day, 'distance.payable_km')}</td><td>${day.wallet !== undefined ? esc(money(day.wallet)) : '—'}</td><td class="sm" style="max-width:240px">${esc((day.actions || []).join(' · ') || '—')}</td></tr>`; }).join('')}</tbody></table></div>` : `<div class="mut">${esc(t('hsr.noDays'))}</div>`;
+  const table = days.length ? `<div class="tw"><table><thead><tr>${[t('req.date'), t('hsr.notified'), t('hsr.completed'), t('hsr.declined'), t('hsr.workH'), t('hsr.lostH'), t('hsr.breakH'), seesEntitlement() ? t('hsr.kmPay') : t('hsr.kmTotal'), t('hsr.wallet'), t('hs.notes')].map(k => `<th>${esc(k)}</th>`).join('')}</tr></thead><tbody>${days.map(dd => { const day = byDay.get(dd); return `<tr><td><b>${esc(fmtDate(dd))}</b></td><td>${g(day, 'perf.notified_deliveries')}</td><td><b>${g(day, 'perf.completed_deliveries')}</b></td><td>${g(day, 'perf.declined_deliveries')}</td><td>${g(day, 'perf.actual_working_hours')}</td><td>${g(day, 'perf.lost_hours')}</td><td>${g(day, 'perf.break_hours')}</td><td>${g(day, seesEntitlement() ? 'distance.payable_km' : 'distance.total_km')}</td><td>${day.wallet !== undefined ? esc(money(day.wallet)) : '—'}</td><td class="sm" style="max-width:240px">${esc((day.actions || []).join(' · ') || '—')}</td></tr>`; }).join('')}</tbody></table></div>` : `<div class="mut">${esc(t('hsr.noDays'))}</div>`;
   const acts = (x.actions || []).length ? `<h4 style="margin:20px 0 6px">${esc(t('hsr.actions'))}</h4><div class="list">${x.actions.map(a => `<div class="kv"><span>${esc(fmtDate(a.d))} · ${esc(a.i || a.ie || '')}</span><b style="font-weight:500">${esc(a.a || '')}</b></div>`).join('')}</div>` : '';
   openModal({
     title: x.name, desc: `${t('hsr.riderNo')} ${rid} · ${fmtDate(r.from)} – ${fmtDate(r.to)}`, size: 'xl',
@@ -2679,12 +2686,13 @@ function finVouchersTab() {
   return `<div class="toolbar">${searchBox('finance', t('fin.search'))}<div class="acts">${btn('pdfReport', t('rep.pdf'), { cls: 'sm', icon: 'file-pdf', data: { k: 'vouchers' } })}</div></div>${list.length ? `<div class="tw"><table><thead><tr><th>${esc(t('fin.voucherNo'))}</th><th>${esc(t('req.date'))}</th><th>${esc(t('req.type'))}</th><th>${esc(t('fin.party'))}</th><th>${esc(t('req.amount'))}</th><th>${esc(t('fin.refDoc'))}</th><th>${esc(t('docs.status'))}</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : emptyState(t('fin.emptyVouT'), t('fin.emptyVouD'))}`;
 }
 function finEntitlementTab() {
-  const o = OPS(), k = rates();
-  if (!o || !o.rows.length) return emptyState(t('fin.emptyEntT'), t('fin.emptyEntD'));
+  const o = OPS(), k = rates(), cur = hsPreset();
+  const range = `<div class="toolbar" style="margin:0 0 14px;flex-wrap:wrap;gap:10px"><div class="acts" style="flex-wrap:wrap">${[['yday', t('hsr.pYday')], ['7', t('hsr.p7')], ['month', t('hsr.pMonth')], ['prev', t('hsr.pPrev')]].map(([p, l]) => btn('hsRange', l, { cls: 'sm' + (cur === p ? ' pri' : ''), data: { p } })).join('')}</div>${dateRange('ops')}</div>`;
+  if (!o || !o.rows.length) return range + emptyState(t('fin.emptyEntT'), t('fin.emptyEntD'));
   const x = entTotals(), orders = o.rows.reduce((s, r) => s + r.orders, 0), km = o.rows.reduce((s, r) => s + (r.km || 0), 0);
-  const kv = [[t('fin.rateOrder'), `${SAR(k.order)}`], [t('fin.rateKm'), `${SAR(k.km)}`], [t('hs.orders'), nf(orders)], [t('hs.km'), nf(r2(km))], [t('fin.entOrders'), SAR(money(x.orders))], [t('fin.entKm'), SAR(money(x.km))], [t('fin.exclVat'), SAR(money(x.sub))], [`${t('fin.vat')} ${k.vat}%`, SAR(money(x.vat))], [t('fin.inclVat'), SAR(money(x.total))]];
-  const rows = o.rows.map(r => { const e = entOf(r); return `<tr><td><b>${esc(r.name)}</b></td><td>${nf(r.orders)}</td><td>${r.km !== undefined ? nf(r2(r.km)) : '—'}</td><td>${esc(money(e.orders))}</td><td>${esc(money(e.km))}</td><td><b>${esc(money(e.sub))}</b></td></tr>`; }).join('');
-  return `<div class="mut sm" style="margin-bottom:10px">${esc(o.file)} · ${esc(fmtDate(o.at))}</div><div class="split" style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr);gap:18px"><div>${kv.map(([a, b]) => `<div class="kv"><span>${esc(a)}</span><b>${esc(b)}</b></div>`).join('')}<div class="acts" style="margin-top:14px">${btn('editRates', t('fin.rates'), { cls: 'sm', icon: 'edit' })}${btn('exportCSV', t('rep.export'), { cls: 'sm', icon: 'download', data: { k: 'entitlement' } })}${btn('pdfReport', t('rep.pdf'), { cls: 'sm pri', icon: 'file-pdf', data: { k: 'entitlement' } })}</div></div><div class="tw"><table><thead><tr><th>${esc(t('ops.courier'))}</th><th>${esc(t('hs.orders'))}</th><th>${esc(t('hs.km'))}</th><th>${esc(t('fin.entOrders'))}</th><th>${esc(t('fin.entKm'))}</th><th>${esc(t('fin.entSub'))}</th></tr></thead><tbody>${rows}</tbody><tfoot><tr><td><b>${esc(t('print.total'))}</b></td><td><b>${nf(orders)}</b></td><td><b>${nf(r2(km))}</b></td><td><b>${esc(money(x.orders))}</b></td><td><b>${esc(money(x.km))}</b></td><td><b>${esc(money(x.sub))}</b></td></tr></tfoot></table></div></div>`;
+  const kv = [[t('fin.rateOrder'), `${SAR(k.order)}`], [t('fin.rateKm'), `${SAR(k.km)}`], [t('hs.orders'), nf(orders)], [t('hs.km'), nf(r2(km))], [t('fin.entOrders'), SAR(money(x.orders))], [t('fin.entKm'), SAR(money(x.km))], [t('fin.entBonus'), SAR(money(x.bonus))], [t('fin.segRates'), SEGS.map(g => `${g} ${k['seg' + g]}`).join(' · ')], [t('fin.exclVat'), SAR(money(x.sub))], [`${t('fin.vat')} ${k.vat}%`, SAR(money(x.vat))], [t('fin.inclVat'), SAR(money(x.total))]];
+  const rows = o.rows.map(r => { const e = entOf(r); return `<tr><td><b>${esc(r.name)}</b></td><td>${nf(r.orders)}</td><td>${r.km !== undefined ? nf(r2(r.km)) : '—'}</td><td>${r.segment ? chip(r.segment, segTone(r.segment)) : '—'}</td><td>${esc(money(e.orders))}</td><td>${esc(money(e.km))}</td><td>${esc(money(e.bonus))}</td><td><b>${esc(money(e.sub))}</b></td></tr>`; }).join('');
+  return `${range}<div class="mut sm" style="margin-bottom:10px">${esc(o.file)} · ${esc(fmtDate(o.at))}</div><div class="split" style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr);gap:18px"><div>${kv.map(([a, b]) => `<div class="kv"><span>${esc(a)}</span><b>${esc(b)}</b></div>`).join('')}<div class="acts" style="margin-top:14px">${btn('editRates', t('fin.rates'), { cls: 'sm', icon: 'edit' })}${btn('exportCSV', t('rep.export'), { cls: 'sm', icon: 'download', data: { k: 'entitlement' } })}${btn('pdfReport', t('rep.pdf'), { cls: 'sm pri', icon: 'file-pdf', data: { k: 'entitlement' } })}</div></div><div class="tw"><table><thead><tr><th>${esc(t('ops.courier'))}</th><th>${esc(t('hs.orders'))}</th><th>${esc(t('hs.km'))}</th><th>${esc(t('hsr.seg'))}</th><th>${esc(t('fin.entOrders'))}</th><th>${esc(t('fin.entKm'))}</th><th>${esc(t('fin.entBonus'))}</th><th>${esc(t('fin.entSub'))}</th></tr></thead><tbody>${rows}</tbody><tfoot><tr><td><b>${esc(t('print.total'))}</b></td><td><b>${nf(orders)}</b></td><td><b>${nf(r2(km))}</b></td><td></td><td><b>${esc(money(x.orders))}</b></td><td><b>${esc(money(x.km))}</b></td><td><b>${esc(money(x.bonus))}</b></td><td><b>${esc(money(x.sub))}</b></td></tr></tfoot></table></div></div>`;
 }
 function pgFinance() {
   const ent = seesEntitlement();
@@ -3905,6 +3913,13 @@ fin.vat|VAT|الضريبة
 fin.entTitle|HungerStation entitlement|مستحق هنقرستيشن
 fin.entOrders|Orders amount|مبلغ الطلبات
 fin.entKm|Distance amount|مبلغ المسافة
+fin.entBonus|Quality bonus|مكافأة التقييم
+fin.bonusFoot|Per completed order by segment, for the company|لكل طلب منفذ حسب الفئة، للشركة
+fin.segRates|Bonus per order (A–F)|المكافأة لكل طلب (A–F)
+fin.segSec|Quality bonus by segment|مكافأة التقييم حسب الفئة
+fin.segSecD|Added to the company's entitlement for every completed order, by the courier's HungerStation segment.|تُضاف لاستحقاق الشركة عن كل طلب منفذ حسب فئة المندوب في هنقرستيشن.
+fin.rateSeg|Segment {s} per order|الفئة {s} لكل طلب
+hsr.kmFoot|Distance driven in the period|المسافة المقطوعة في الفترة
 fin.entSub|Total excl. VAT|الإجمالي بدون الضريبة
 fin.entTotal|Total incl. VAT|الإجمالي مع الضريبة
 fin.exclVat|Total excl. VAT|الإجمالي بدون الضريبة
