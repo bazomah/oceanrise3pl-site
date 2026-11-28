@@ -1,0 +1,39 @@
+# dependencies and build leftovers (the site has no build step; GitHub Pages serves these files as they are)
+node_modules/
+package-lock.json
+npm-debug.log*
+yarn-error.log*
+
+# secrets and local configuration — never commit these
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+secrets/
+credentials*.json
+service-account*.json
+supabase/.temp/
+supabase/.branches/
+supabase/.env
+**/supabase/functions/.env
+
+# backups and archives
+*.zip
+*.bak
+*.tmp
+*.orig
+
+# logs
+*.log
+logs/
+
+# operating system and editor files
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.swp
+*~
