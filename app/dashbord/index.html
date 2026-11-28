@@ -3131,7 +3131,7 @@ function pwModal(locked) {
       if (v.nw.length < 8 || !/[A-Za-z]/.test(v.nw) || !/[0-9]/.test(v.nw)) return t('auth.weak');
       (async () => {
         const r = await fn('change-password', { oldPassword: v.old, newPassword: v.nw });
-        if (!r.ok) { toast(r.status === 429 ? t('auth.locked', { s: 15 }) : t(r.data.error === 'wrongOld' ? 'auth.wrongOld' : r.data.error === 'same' ? 'auth.same' : 'auth.weak'), 'warn'); return; }
+        if (!r.ok) { toast(r.status === 429 ? t('auth.locked', { s: 15 }) : t(r.data.error === 'wrongOld' ? 'auth.wrongOld' : r.data.error === 'same' ? 'auth.same' : r.data.error === 'leaked' ? 'auth.leaked' : 'auth.weak'), 'warn'); return; }
         closeModal(); toast(t('auth.pwDone'));
         if (SRV.me && SRV.me.must) { SRV.me.must = false; try { adopt(await fetchAll()); UI.page = firstPage(); render(true); } catch (e) { toast(t('sync.fail'), 'bad'); } }
       })();
@@ -3681,6 +3681,7 @@ auth.new2|Repeat new password|أعد كتابة كلمة السر الجديدة
 auth.must|Choose your own password before continuing.|اختر كلمة سر خاصة بك قبل المتابعة.
 auth.pwHint|At least 8 characters with letters and numbers.|8 أحرف على الأقل وتحتوي على أحرف وأرقام.
 auth.wrongOld|Current password is incorrect|كلمة السر الحالية غير صحيحة
+auth.leaked|This password appeared in known data leaks. Choose another one.|كلمة السر هذه ظهرت في تسريبات معروفة. اختر كلمة أخرى.
 file.badName|File name is not allowed|اسم الملف غير مسموح
 file.badType|This file type is not allowed|نوع الملف غير مسموح
 file.badContent|The file content does not match its type|محتوى الملف لا يطابق نوعه
